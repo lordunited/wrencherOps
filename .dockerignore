@@ -1,0 +1,9 @@
+.git
+.env
+.env.*
+!.env.example
+bin/
+*.md
+web/node_modules
+web/.next
+web/.env*
