@@ -218,6 +218,27 @@ The panel never deploys or deletes a connected stack, and its compose file is sh
 
 The SSH user needs access to Docker. To change config files owned by root, it must be `root` or be allowed to use `sudo` without a password. If Prometheus is protected with TLS or a password through a web config file, the panel says so and can't read it yet.
 
+### Nginx configuration
+
+**Deploy → Nginx** manages Nginx configuration: server blocks, upstreams and config files. It doesn't manage website content.
+
+- **+ New Nginx** runs the official Nginx image with its config in a `conf.d` folder on the server, and a `certs` folder mounted read-only at `/etc/nginx/certs`. It starts with a default server that answers `/healthz` and refuses everything else.
+- **Connect existing** finds the Nginx containers on a server, including nginx-unprivileged and OpenResty, however their compose files and mounts are set up. Connected Nginx servers are protected the same way as connected Prometheus stacks.
+
+The **Nginx config** tab shows the configuration as Nginx itself loads it:
+
+- the Nginx version, whether the config on disk passes `nginx -t`, CPU, memory and process count, and recent errors from its log
+- every **server block** with its domains, listen ports, HTTPS certificate and what each location does, searchable by domain, port, path or target
+- every **upstream** with its backends and balancing method
+- the main **global settings**, such as worker processes, `client_max_body_size`, gzip and includes
+- every **config file**, with **Edit** and **Remove**
+
+**+ New server block** writes a reverse proxy, a load balancer (with its own upstream, round robin, least connections or sticky by client), or a redirect as its own file. It can add HTTPS with your certificate, send HTTP visitors to HTTPS, allow WebSockets, and set an upload limit and a timeout.
+
+Every change shows a before and after first. **Apply to server** saves a backup of each file under `/var/backups/devops-panel/`, writes the change and runs `nginx -t`. Only if the test passes does Nginx reload, gracefully, without dropping open connections. If the test fails, the previous files are put back and Nginx keeps serving as before. Every change is recorded in the Activity history.
+
+For a connected Nginx, the 5-minute health check also requires the config on disk to pass `nginx -t`.
+
 ### Status and health
 
 Each service shows two badges.

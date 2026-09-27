@@ -196,3 +196,20 @@ func TestFileNameAndNewFileDir(t *testing.T) {
 		t.Error("IsNginxImage")
 	}
 }
+
+func TestLastLinePrefersEmerg(t *testing.T) {
+	out := "nginx: [emerg] unknown directive \"proxy_passs\" in /etc/nginx/conf.d/x.conf:5\nnginx: configuration file /etc/nginx/nginx.conf test failed"
+	if got := lastLine(out); got != `[emerg] unknown directive "proxy_passs" in /etc/nginx/conf.d/x.conf:5` {
+		t.Errorf("lastLine = %q", got)
+	}
+}
+
+func TestParseKeepsEscapes(t *testing.T) {
+	ds, err := Parse(`return 200 "ok\n"; add_header X "a\"b";`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ds[0].Args[1] != `ok\n` || ds[1].Args[1] != `a"b` {
+		t.Errorf("args = %q / %q", ds[0].Args, ds[1].Args)
+	}
+}

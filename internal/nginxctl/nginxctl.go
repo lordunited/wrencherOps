@@ -346,11 +346,15 @@ func indent(s string) string {
 	return "  " + strings.ReplaceAll(s, "\n", "\n  ")
 }
 
+// lastLine picks the line of nginx -t output that explains a failure: the
+// [emerg] line naming the file and problem, else the last line.
 func lastLine(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if strings.Contains(lines[i], "[emerg]") || strings.Contains(lines[i], "failed") {
-			return strings.TrimSpace(lines[i])
+	for _, want := range []string{"[emerg]", "[crit]", "failed"} {
+		for _, l := range lines {
+			if strings.Contains(l, want) {
+				return strings.TrimSpace(strings.TrimPrefix(l, "nginx: "))
+			}
 		}
 	}
 	return strings.TrimSpace(lines[len(lines)-1])

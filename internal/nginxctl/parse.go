@@ -81,7 +81,13 @@ func (p *parser) next() (kind int, text string, err error) {
 		for p.pos < len(p.src) {
 			ch := p.src[p.pos]
 			if ch == '\\' && p.pos+1 < len(p.src) {
-				b.WriteByte(p.src[p.pos+1])
+				// \" \' and \\ stand for the character itself; other escapes
+				// (\n, \t, \r) are kept as written, the way people read them.
+				next := p.src[p.pos+1]
+				if next != '"' && next != '\'' && next != '\\' {
+					b.WriteByte('\\')
+				}
+				b.WriteByte(next)
 				p.pos += 2
 				continue
 			}

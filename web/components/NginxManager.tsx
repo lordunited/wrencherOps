@@ -10,6 +10,11 @@ import { loadSnapshot } from "@/lib/snapshots";
 
 const MAIN_CONFIG = "/etc/nginx/nginx.conf";
 
+// A tag for a config term, shown exactly as it's written in the config.
+function Term({ children }: { children: React.ReactNode }) {
+  return <span className="rounded-full bg-surface-1 px-2 py-0.5 font-mono text-[11px] font-semibold text-text-secondary">{children}</span>;
+}
+
 function target(s: NginxServer) {
   if (s.return) return `return ${s.return}`;
   if (s.proxyPass) return `→ ${s.proxyPass}`;
@@ -289,9 +294,9 @@ export function NginxManager({
               <li key={`${s.file}:${s.line}`} className="flex flex-col gap-2 rounded-2xl bg-surface-2 px-4 py-3">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="break-all font-mono text-sm font-bold text-text-primary">{s.names.length ? s.names.join(" ") : "(no server_name)"}</span>
-                  {s.context === "stream" && <StatusBadge role="muted" label="stream (TCP/UDP)" />}
+                  {s.context === "stream" && <Term>stream (TCP/UDP)</Term>}
                   {s.ssl && <StatusBadge role="good" label="HTTPS" />}
-                  {s.defaultServer && <StatusBadge role="muted" label="default server" />}
+                  {s.defaultServer && <Term>default_server</Term>}
                   <span className="ml-auto font-mono text-xs text-text-muted">listen {s.listen.join(", ") || "80"}</span>
                 </div>
                 <p className="break-all font-mono text-xs text-text-secondary">{target(s)}</p>
@@ -334,8 +339,8 @@ export function NginxManager({
             <li key={`${u.file}:${u.line}`} className="flex flex-col gap-1.5 rounded-2xl bg-surface-2 px-4 py-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono text-sm font-bold text-text-primary">{u.name}</span>
-                <StatusBadge role="muted" label={u.method} />
-                {u.keepalive && <StatusBadge role="muted" label={`keepalive ${u.keepalive}`} />}
+                <Term>{u.method}</Term>
+                {u.keepalive && <Term>keepalive {u.keepalive}</Term>}
                 <span className="ml-auto font-mono text-[11px] text-text-muted">
                   {u.file}:{u.line}
                 </span>
