@@ -1,3 +1,4 @@
+import { TableCard } from "@/components/TableCard";
 import Link from "next/link";
 import { StatTile } from "@/components/StatTile";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -27,7 +28,7 @@ export default async function ProjectDetailPage(props: PageProps<"/projects/[id]
           ← All projects
         </Link>
         <div className="mt-2 flex items-baseline gap-3">
-          <h1 className="text-xl font-semibold text-text-primary">{project.name}</h1>
+          <h1 className="page-title">{project.name}</h1>
           <span className="text-sm text-text-muted">{project.visibility}</span>
         </div>
         <p className="mt-1 text-sm text-text-secondary">{project.path_with_namespace}</p>
@@ -52,10 +53,11 @@ export default async function ProjectDetailPage(props: PageProps<"/projects/[id]
       </div>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-text-primary">
+        <h2 className="section-title">
           Pipelines <span className="text-text-muted">({pipelines.length})</span>
         </h2>
-        <table className="w-full border-collapse text-sm">
+        <TableCard>
+      <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-gridline text-left text-text-secondary">
               <th className="py-2 pr-4 font-medium">Status</th>
@@ -86,13 +88,15 @@ export default async function ProjectDetailPage(props: PageProps<"/projects/[id]
             )}
           </tbody>
         </table>
+      </TableCard>
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-text-primary">
+        <h2 className="section-title">
           Open merge requests <span className="text-text-muted">({mergeRequests.length})</span>
         </h2>
-        <table className="w-full border-collapse text-sm">
+        <TableCard>
+      <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-gridline text-left text-text-secondary">
               <th className="py-2 pr-4 font-medium">Title</th>
@@ -135,13 +139,15 @@ export default async function ProjectDetailPage(props: PageProps<"/projects/[id]
             )}
           </tbody>
         </table>
+      </TableCard>
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-text-primary">
+        <h2 className="section-title">
           Members <span className="text-text-muted">({members.length})</span>
         </h2>
-        <table className="w-full border-collapse text-sm">
+        <TableCard>
+      <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-gridline text-left text-text-secondary">
               <th className="py-2 pr-4 font-medium">Username</th>
@@ -175,6 +181,7 @@ export default async function ProjectDetailPage(props: PageProps<"/projects/[id]
             )}
           </tbody>
         </table>
+      </TableCard>
       </section>
     </div>
   );

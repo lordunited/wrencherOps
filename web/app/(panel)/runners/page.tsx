@@ -1,3 +1,4 @@
+import { TableCard } from "@/components/TableCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getRunners } from "@/lib/api";
 import { runnerStatusRole } from "@/lib/format";
@@ -7,9 +8,10 @@ export default async function RunnersPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold text-text-primary">
+      <h1 className="page-title">
         Runners <span className="text-text-muted">({runners.length})</span>
       </h1>
+      <TableCard>
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-gridline text-left text-text-secondary">
@@ -32,6 +34,7 @@ export default async function RunnersPage() {
           ))}
         </tbody>
       </table>
+      </TableCard>
     </div>
   );
 }

@@ -45,6 +45,12 @@ func main() {
 	}
 
 	serviceStore := service.NewStore(pool)
+	logStore := service.NewLogStore(pool)
+	if n, err := logStore.MarkInterrupted(ctx); err != nil {
+		log.Fatalf("service logs: %v", err)
+	} else if n > 0 {
+		log.Printf("service logs: marked %d interrupted action(s) as failed", n)
+	}
 	jobStore := deploy.NewStore()
 
 	mux := http.NewServeMux()
@@ -62,7 +68,9 @@ func main() {
 	deployHandler.RegisterRoutes(deployMux)
 	mux.Handle("/api/deploy/", authHandler.RequireAuth(deployMux))
 
-	serviceHandler := service.NewHandler(serviceStore, jobStore, secrets)
+	serviceHandler := service.NewHandler(serviceStore, logStore, service.NewSnapshotStore(pool), jobStore, secrets)
+	// Watches connected stacks until their Start/Stop/Down unlock.
+	serviceHandler.StartMonitor(ctx)
 	serviceMux := http.NewServeMux()
 	serviceHandler.RegisterRoutes(serviceMux)
 	mux.Handle("/api/services", authHandler.RequireAuth(serviceMux))

@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/Button";
 
 const FIELD_CLASS =
-  "rounded-md border border-border bg-background px-3 py-2 text-sm text-text-primary";
+  "field";
 const LABEL_CLASS = "flex flex-col gap-1 text-sm text-text-secondary";
 
 function splitLines(value: string, separator: string): string[] {
@@ -88,7 +88,7 @@ export default function NewPrometheusServicePage() {
         ← Prometheus stack
       </Link>
       <div>
-        <h1 className="text-xl font-semibold text-text-primary">New Prometheus stack</h1>
+        <h1 className="page-title">New Prometheus stack</h1>
         <p className="mt-1 text-sm text-text-secondary">
           This creates the service record and generates its docker-compose.yml — Prometheus,
           Grafana, Alertmanager, and node_exporter, wired together: Prometheus scrapes itself,
@@ -99,9 +99,9 @@ export default function NewPrometheusServicePage() {
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-8">
-        <fieldset className="flex flex-col gap-4" disabled={submitting}>
+        <fieldset className="card-fieldset flex flex-col gap-4" disabled={submitting}>
           <legend className="text-sm font-semibold text-text-primary">Target server</legend>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className={LABEL_CLASS}>
               Name
               <input
@@ -139,7 +139,7 @@ export default function NewPrometheusServicePage() {
                 required
               />
             </label>
-            <label className={`${LABEL_CLASS} col-span-2`}>
+            <label className={`${LABEL_CLASS} sm:col-span-2`}>
               Deploy directory (on the target server)
               <input
                 value={deployDir}
@@ -153,9 +153,9 @@ export default function NewPrometheusServicePage() {
           </p>
         </fieldset>
 
-        <fieldset className="flex flex-col gap-4" disabled={submitting}>
+        <fieldset className="card-fieldset flex flex-col gap-4" disabled={submitting}>
           <legend className="text-sm font-semibold text-text-primary">Stack configuration</legend>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className={LABEL_CLASS}>
               Prometheus port
               <input
@@ -232,11 +232,11 @@ export default function NewPrometheusServicePage() {
           </div>
         </fieldset>
 
-        <fieldset className="flex flex-col gap-4" disabled={submitting}>
+        <fieldset className="card-fieldset flex flex-col gap-4" disabled={submitting}>
           <legend className="text-sm font-semibold text-text-primary">
             Advanced (networks, volumes, sizing)
           </legend>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className={LABEL_CLASS}>
               Prometheus CPU limit (optional)
               <input

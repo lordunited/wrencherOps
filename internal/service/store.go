@@ -7,11 +7,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"devops-wrapper/internal/deploy"
 	"devops-wrapper/internal/randid"
 )
 
@@ -27,7 +29,46 @@ const (
 	StatusRemoving  Status = "removing"
 	StatusDown      Status = "down"
 	StatusFailed    Status = "failed"
+	// StatusConnected is the standing status of a connected service: the
+	// panel didn't deploy it and has no deploy state to report.
+	StatusConnected Status = "connected"
 )
+
+const (
+	// OriginPanel services were created and deployed by the panel.
+	OriginPanel = "panel"
+	// OriginConnected services are existing stacks the panel attached to.
+	// The panel inspects and configures them but never deploys, stops or
+	// removes anything of theirs.
+	OriginConnected = "connected"
+)
+
+// Connected reports whether the panel only attached to this service.
+func (s *Service) Connected() bool { return s.Origin == OriginConnected }
+
+// ControlsUnlockAfter is how long a connected stack must stay healthy,
+// without a single failed check, before the panel lets anyone start, stop
+// or take it down.
+const ControlsUnlockAfter = 5 * time.Minute
+
+// ControlsUnlocked reports whether Start/Stop/Down may be used. Panel
+// stacks always may; connected stacks only after their first
+// ControlsUnlockAfter of continuous health.
+func (s *Service) ControlsUnlocked() bool { return !s.Connected() || s.ControlsUnlockedAt != nil }
+
+// Project is how to address the service's Compose project on the server.
+func (s *Service) Project() deploy.Project {
+	if !s.Connected() {
+		return deploy.Project{Dir: s.DeployDir}
+	}
+	p := deploy.Project{Dir: s.DeployDir, Name: s.ComposeProject}
+	for _, f := range strings.Split(s.ComposeFiles, ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			p.Files = append(p.Files, f)
+		}
+	}
+	return p
+}
 
 // Service is a deployable unit: connection details for its target server
 // plus the YAML that defines it — a docker-compose file for type "gitlab"
@@ -58,19 +99,31 @@ type Service struct {
 	LastSyncedAt      *time.Time `json:"lastSyncedAt,omitempty"`
 	EncryptedPassword string     `json:"-"`
 	HasSavedPassword  bool       `json:"hasSavedPassword"`
-	CreatedAt         time.Time  `json:"createdAt"`
-	UpdatedAt         time.Time  `json:"updatedAt"`
+	Origin            string     `json:"origin"`         // "panel" or "connected"
+	Container         string     `json:"container"`      // pinned container, for connected services
+	ComposeProject    string     `json:"composeProject"` // for connected services
+	ComposeFiles      string     `json:"composeFiles"`   // comma-separated, for connected services
+	// HealthySince is when the current unbroken run of healthy checks
+	// began; nil while unhealthy or not yet checked.
+	HealthySince *time.Time `json:"healthySince,omitempty"`
+	// ControlsUnlockedAt is when a connected stack first stayed healthy for
+	// ControlsUnlockAfter; Start/Stop/Down are refused until then.
+	ControlsUnlockedAt *time.Time `json:"controlsUnlockedAt,omitempty"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
 const serviceColumns = `id, name, type, host, port, username, deploy_dir, manifest, status,
-	last_job_id, health, health_detail, last_synced_at, encrypted_password, created_at, updated_at`
+	last_job_id, health, health_detail, last_synced_at, encrypted_password, created_at, updated_at,
+	origin, container, compose_project, compose_files, healthy_since, controls_unlocked_at`
 
 func scanService(row pgx.Row) (*Service, error) {
 	var svc Service
 	err := row.Scan(&svc.ID, &svc.Name, &svc.Type, &svc.Host, &svc.Port, &svc.Username,
 		&svc.DeployDir, &svc.Manifest, &svc.Status, &svc.LastJobID,
 		&svc.Health, &svc.HealthDetail, &svc.LastSyncedAt, &svc.EncryptedPassword,
-		&svc.CreatedAt, &svc.UpdatedAt)
+		&svc.CreatedAt, &svc.UpdatedAt, &svc.Origin, &svc.Container, &svc.ComposeProject,
+		&svc.ComposeFiles, &svc.HealthySince, &svc.ControlsUnlockedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -126,14 +179,18 @@ func (s *Store) Create(ctx context.Context, svc *Service) error {
 	if svc.Health == "" {
 		svc.Health = "unknown"
 	}
+	if svc.Origin == "" {
+		svc.Origin = OriginPanel
+	}
 
 	_, err = s.pool.Exec(ctx, `
 		INSERT INTO services (`+serviceColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
 		svc.ID, svc.Name, svc.Type, svc.Host, svc.Port, svc.Username,
 		svc.DeployDir, svc.Manifest, svc.Status, svc.LastJobID,
 		svc.Health, svc.HealthDetail, svc.LastSyncedAt, svc.EncryptedPassword,
-		svc.CreatedAt, svc.UpdatedAt)
+		svc.CreatedAt, svc.UpdatedAt, svc.Origin, svc.Container, svc.ComposeProject,
+		svc.ComposeFiles, svc.HealthySince, svc.ControlsUnlockedAt)
 	return err
 }
 
@@ -161,10 +218,12 @@ func (s *Store) Update(ctx context.Context, id string, mutate func(*Service)) (*
 	_, err = tx.Exec(ctx, `
 		UPDATE services
 		SET name=$1, host=$2, port=$3, username=$4, deploy_dir=$5, manifest=$6, status=$7, last_job_id=$8,
-			health=$9, health_detail=$10, last_synced_at=$11, encrypted_password=$12, updated_at=$13
-		WHERE id=$14`,
+			health=$9, health_detail=$10, last_synced_at=$11, encrypted_password=$12, updated_at=$13,
+			container=$14, compose_project=$15, compose_files=$16, healthy_since=$17, controls_unlocked_at=$18
+		WHERE id=$19`,
 		svc.Name, svc.Host, svc.Port, svc.Username, svc.DeployDir, svc.Manifest, svc.Status, svc.LastJobID,
-		svc.Health, svc.HealthDetail, svc.LastSyncedAt, svc.EncryptedPassword, svc.UpdatedAt, svc.ID)
+		svc.Health, svc.HealthDetail, svc.LastSyncedAt, svc.EncryptedPassword, svc.UpdatedAt,
+		svc.Container, svc.ComposeProject, svc.ComposeFiles, svc.HealthySince, svc.ControlsUnlockedAt, svc.ID)
 	if err != nil {
 		return nil, err
 	}

@@ -76,9 +76,6 @@ func ExamplePrometheusStackConfig_ComposeYAML() {
 	//     image: prom/prometheus:latest
 	//     container_name: monitoring-prometheus
 	//     restart: always
-	//     configs:
-	//       - source: prometheus_config
-	//         target: /etc/prometheus/prometheus.yml
 	//     command:
 	//       - '--config.file=/etc/prometheus/prometheus.yml'
 	//       - '--storage.tsdb.path=/prometheus'
@@ -86,6 +83,7 @@ func ExamplePrometheusStackConfig_ComposeYAML() {
 	//     ports:
 	//       - '9090:9090'
 	//     volumes:
+	//       - '/opt/monitoring/prometheus-config:/etc/prometheus'
 	//       - '/opt/monitoring/prometheus-data:/prometheus'
 	//       - '/opt/monitoring/rules:/etc/prometheus/rules:ro'
 	//     cpus: '2'
@@ -163,24 +161,6 @@ func ExamplePrometheusStackConfig_ComposeYAML() {
 	//       - shared_net
 	//
 	// configs:
-	//   prometheus_config:
-	//     content: |
-	//       global:
-	//         scrape_interval: 15s
-	//       scrape_configs:
-	//         - job_name: 'prometheus'
-	//           static_configs:
-	//             - targets: ['localhost:9090']
-	//         - job_name: 'node-exporter'
-	//           static_configs:
-	//             - targets: ['node-exporter:9100']
-	//         - job_name: 'alertmanager'
-	//           static_configs:
-	//             - targets: ['alertmanager:9093']
-	//       alerting:
-	//         alertmanagers:
-	//           - static_configs:
-	//               - targets: ['alertmanager:9093']
 	//   grafana_datasource:
 	//     content: |
 	//       apiVersion: 1

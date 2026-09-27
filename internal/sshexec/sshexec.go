@@ -4,9 +4,12 @@
 package sshexec
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"path"
 	"strings"
 	"time"
@@ -64,6 +67,55 @@ func (c *Client) Run(cmd string, out io.Writer) error {
 	session.Stdout = out
 	session.Stderr = out
 	return session.Run(cmd)
+}
+
+// Output executes a command and returns its stdout and stderr separately,
+// for commands whose output is parsed (JSON, file contents) and must not
+// be mixed with warnings on stderr.
+func (c *Client) Output(cmd string) (stdout, stderr string, err error) {
+	session, err := c.conn.NewSession()
+	if err != nil {
+		return "", "", err
+	}
+	defer session.Close()
+
+	var out, errOut strings.Builder
+	session.Stdout = &out
+	session.Stderr = &errOut
+	err = session.Run(cmd)
+	return out.String(), errOut.String(), err
+}
+
+// Alive reports whether the connection still answers, for callers that
+// keep a Client open between requests.
+func (c *Client) Alive() bool {
+	_, _, err := c.conn.SendRequest("keepalive@openssh.com", true, nil)
+	return err == nil
+}
+
+// HTTPGet makes an HTTP GET request to addr (host:port as the server sees
+// it, e.g. a container's IP) through this SSH connection, like "ssh -L".
+// It returns the status and body whatever the status, so callers can read
+// error details from 4xx responses. The body is capped at 20 MB.
+func (c *Client) HTTPGet(ctx context.Context, addr, pathAndQuery string) (int, []byte, error) {
+	transport := &http.Transport{
+		DialContext: func(context.Context, string, string) (net.Conn, error) {
+			return c.conn.Dial("tcp", addr)
+		},
+		DisableKeepAlives: true,
+	}
+	client := &http.Client{Transport: transport, Timeout: 20 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+pathAndQuery, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
+	return resp.StatusCode, body, err
 }
 
 // WriteFile uploads content to a remote path. Content is base64-encoded

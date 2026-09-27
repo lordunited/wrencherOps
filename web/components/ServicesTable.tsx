@@ -2,7 +2,7 @@ import Link from "next/link";
 import { LinkButton } from "@/components/Button";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { Service } from "@/lib/api";
-import { serviceStatusRole } from "@/lib/format";
+import { serviceHealthRole, serviceStatusRole } from "@/lib/format";
 
 export function ServicesTable({
   title,
@@ -11,6 +11,7 @@ export function ServicesTable({
   basePath,
   newHref,
   newLabel,
+  extraAction,
 }: {
   title: string;
   description: string;
@@ -18,39 +19,58 @@ export function ServicesTable({
   basePath: string;
   newHref: string;
   newLabel: string;
+  extraAction?: { href: string; label: string };
 }) {
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-text-primary">{title}</h1>
+          <h1 className="page-title">{title}</h1>
           <p className="mt-1 text-sm text-text-secondary">{description}</p>
         </div>
-        <LinkButton href={newHref}>{newLabel}</LinkButton>
+        <div className="flex flex-wrap gap-2">
+          {extraAction && (
+            <LinkButton href={extraAction.href} variant="secondary">
+              {extraAction.label}
+            </LinkButton>
+          )}
+          <LinkButton href={newHref}>{newLabel}</LinkButton>
+        </div>
       </div>
 
       {services.length === 0 ? (
-        <p className="rounded-lg border border-border bg-surface-1 px-4 py-10 text-center text-sm text-text-muted">
-          None yet.
-        </p>
+        <div className="card flex flex-col items-center gap-2 px-6 py-12 text-center">
+          <p className="section-title">No services yet</p>
+          <p className="max-w-sm text-sm text-text-muted">
+            Create one to install it on a server of your choice.
+          </p>
+        </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {services.map((svc) => (
             <Link
               key={svc.id}
               href={`${basePath}/${svc.id}`}
-              className="flex flex-col gap-2 rounded-lg bg-surface-1 p-4 transition-colors hover:bg-surface-hover"
+              className="card flex flex-col gap-3 p-5 transition-transform hover:-translate-y-0.5"
             >
               <div className="flex items-start justify-between gap-2">
-                <span className="truncate font-semibold text-text-primary">{svc.name}</span>
+                <span className="min-w-0 truncate text-base font-bold text-text-primary">
+                  {svc.name}
+                  {svc.origin === "connected" && (
+                    <span className="ml-2 align-middle text-[11px] font-semibold text-text-muted">connected</span>
+                  )}
+                </span>
                 <StatusBadge role={serviceStatusRole(svc.status)} label={svc.status} />
               </div>
-              <span className="truncate text-sm text-text-secondary">
-                {svc.host}:{svc.port}
+              <span className="truncate font-mono text-xs text-text-secondary">
+                {svc.username}@{svc.host}:{svc.port}
               </span>
-              <span className="text-xs text-text-muted">
-                Updated {new Date(svc.updatedAt).toLocaleDateString()}
-              </span>
+              <div className="flex items-center justify-between gap-2">
+                <StatusBadge role={serviceHealthRole(svc.health)} label={svc.health} />
+                <span className="text-xs text-text-muted">
+                  Updated {new Date(svc.updatedAt).toLocaleDateString()}
+                </span>
+              </div>
             </Link>
           ))}
         </div>

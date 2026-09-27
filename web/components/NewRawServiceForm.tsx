@@ -8,7 +8,7 @@ import { Button } from "@/components/Button";
 import { YamlEditor } from "@/components/YamlEditor";
 
 const FIELD_CLASS =
-  "rounded-md border border-border bg-background px-3 py-2 text-sm text-text-primary";
+  "field";
 const LABEL_CLASS = "flex flex-col gap-1 text-sm text-text-secondary";
 
 export function NewRawServiceForm({
@@ -77,14 +77,14 @@ export function NewRawServiceForm({
         ← {backLabel}
       </Link>
       <div>
-        <h1 className="text-xl font-semibold text-text-primary">{title}</h1>
+        <h1 className="page-title">{title}</h1>
         <p className="mt-1 text-sm text-text-secondary">{description}</p>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-8">
-        <fieldset className="flex flex-col gap-4" disabled={submitting}>
+        <fieldset className="card-fieldset flex flex-col gap-4" disabled={submitting}>
           <legend className="text-sm font-semibold text-text-primary">Target server</legend>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className={LABEL_CLASS}>
               Name
               <input
@@ -122,7 +122,7 @@ export function NewRawServiceForm({
                 required
               />
             </label>
-            <label className={`${LABEL_CLASS} col-span-2`}>
+            <label className={`${LABEL_CLASS} sm:col-span-2`}>
               Working directory (where the file is written on the target)
               <input
                 value={deployDir}

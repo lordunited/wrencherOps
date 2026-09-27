@@ -28,9 +28,9 @@ export default async function OverviewPage() {
   const healthIssueCount = health.failingProjects.length + health.staleMergeRequests.length;
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold text-text-primary">Overview</h1>
+        <h1 className="page-title">Overview</h1>
         <p className="mt-1 text-sm text-text-secondary">
           Read-only snapshot of everything this token can see.
         </p>
@@ -39,7 +39,7 @@ export default async function OverviewPage() {
       {healthIssueCount > 0 && (
         <Link
           href="/health"
-          className="flex items-center gap-2 rounded-lg bg-surface-1 px-4 py-3 text-sm transition-colors hover:bg-surface-hover"
+          className="flex items-center gap-2 card px-4 py-3 text-sm transition-colors hover:bg-surface-hover"
         >
           <span
             className="inline-block h-2 w-2 rounded-full"
@@ -55,8 +55,10 @@ export default async function OverviewPage() {
         </Link>
       )}
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-        <StatTile label="Projects" value={compactNumber(projects.length)} href="/projects" />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="col-span-2 sm:col-span-1">
+          <StatTile hero label="Projects" value={compactNumber(projects.length)} href="/projects" hint="Visible to this token" />
+        </div>
         <StatTile
           label="Runners online"
           value={`${compactNumber(onlineRunners)} / ${compactNumber(runners.length)}`}

@@ -120,6 +120,13 @@ type applySpec struct {
 	applyCmd func(deployDir, filePath string) string
 	verb     string // e.g. "Starting services", "Applying manifest" — for the log line
 	doneMsg  string
+
+	// dataDirs are created and handed to their container's user before
+	// applyCmd runs (see DataDirsFor).
+	dataDirs []DataDir
+
+	// seeds are written before applyCmd runs, only where missing.
+	seeds []SeedFile
 }
 
 // dial connects to target, logging progress into job. On failure it marks
@@ -184,6 +191,12 @@ func (s *Store) run(target sshexec.Target, content, deployDir string, spec apply
 		if !checkAvailable(job, client, out, spec.checkCmd, spec.checkDesc, spec.installHint) {
 			return
 		}
+		if !prepareDirs(job, client, out, spec.dataDirs) {
+			return
+		}
+		if !seedFiles(job, client, out, spec.seeds) {
+			return
+		}
 
 		job.appendLog(spec.verb + "...\n")
 		if err := client.Run(spec.applyCmd(deployDir, filePath), out); err != nil {
@@ -208,6 +221,7 @@ type commandSpec struct {
 	cmd         string
 	verb        string
 	doneMsg     string
+	dataDirs    []DataDir // prepared before cmd runs, as in applySpec
 }
 
 // runCommand connects to target and runs spec.cmd, in the background.
@@ -235,6 +249,9 @@ func (s *Store) runCommand(target sshexec.Target, spec commandSpec) *Job {
 		if !checkAvailable(job, client, out, spec.checkCmd, spec.checkDesc, spec.installHint) {
 			return
 		}
+		if !prepareDirs(job, client, out, spec.dataDirs) {
+			return
+		}
 
 		job.appendLog(spec.verb + "...\n")
 		if err := client.Run(spec.cmd, out); err != nil {
@@ -254,8 +271,10 @@ func (s *Store) runCommand(target sshexec.Target, spec commandSpec) *Job {
 // docker compose (the "docker compose" CLI plugin — not the standalone,
 // hyphenated "docker-compose" binary, which is deprecated upstream and
 // often simply absent on a fresh host).
-func (s *Store) RunCompose(target sshexec.Target, composeYAML, deployDir string) *Job {
+func (s *Store) RunCompose(target sshexec.Target, composeYAML, deployDir string, dataDirs []DataDir, seeds []SeedFile) *Job {
 	return s.run(target, composeYAML, deployDir, applySpec{
+		dataDirs:    dataDirs,
+		seeds:       seeds,
 		filename:    "docker-compose.yml",
 		checkCmd:    "docker compose version",
 		checkDesc:   "Docker Compose is available",
@@ -268,20 +287,50 @@ func (s *Store) RunCompose(target sshexec.Target, composeYAML, deployDir string)
 	})
 }
 
+// Project addresses a Compose project on the server. A stack the panel
+// deployed is just its folder, using the default compose file there. A
+// connected stack also carries its project name and compose files, which
+// can have any name and live anywhere.
+type Project struct {
+	Dir   string
+	Name  string
+	Files []string
+}
+
+// Command is the "docker compose" invocation for the project, ready for a
+// subcommand to be appended.
+func (p Project) Command() string {
+	if p.Name == "" && len(p.Files) == 0 {
+		return fmt.Sprintf("cd %s && docker compose", sshexec.ShellQuote(p.Dir))
+	}
+	cmd := "docker compose"
+	if p.Name != "" {
+		cmd += " -p " + sshexec.ShellQuote(p.Name)
+	}
+	if p.Dir != "" {
+		cmd += " --project-directory " + sshexec.ShellQuote(p.Dir)
+	}
+	for _, f := range p.Files {
+		cmd += " -f " + sshexec.ShellQuote(f)
+	}
+	return cmd
+}
+
 // RunComposeStart brings a project back up with "docker compose up -d"
 // against whatever docker-compose.yml is already in deployDir — unlike
 // RunCompose, it doesn't rewrite the file first. This works whether the
 // project was stopped with RunComposeStop (containers still exist, this
 // just starts them) or taken all the way down with RunComposeDown
 // (containers were removed, this recreates them) — "up -d" handles both.
-func (s *Store) RunComposeStart(target sshexec.Target, deployDir string) *Job {
+func (s *Store) RunComposeStart(target sshexec.Target, project Project, dataDirs []DataDir) *Job {
 	return s.runCommand(target, commandSpec{
+		dataDirs:    dataDirs,
 		checkCmd:    "docker compose version",
 		checkDesc:   "Docker Compose is available",
 		installHint: "Install Docker with the Compose plugin: https://docs.docker.com/compose/install/",
 		verb:        "Starting services (docker compose up -d)",
 		doneMsg:     "Containers started.",
-		cmd:         fmt.Sprintf("cd %s && docker compose up -d", sshexec.ShellQuote(deployDir)),
+		cmd:         project.Command() + " up -d",
 	})
 }
 
@@ -289,28 +338,28 @@ func (s *Store) RunComposeStart(target sshexec.Target, deployDir string) *Job {
 // compose project in deployDir — "docker compose stop". Containers,
 // networks, and volumes are left intact, so a later Deploy or a manual
 // "docker compose start" picks up right where it left off.
-func (s *Store) RunComposeStop(target sshexec.Target, deployDir string) *Job {
+func (s *Store) RunComposeStop(target sshexec.Target, project Project) *Job {
 	return s.runCommand(target, commandSpec{
 		checkCmd:    "docker compose version",
 		checkDesc:   "Docker Compose is available",
 		installHint: "Install Docker with the Compose plugin: https://docs.docker.com/compose/install/",
 		verb:        "Stopping services (docker compose stop)",
 		doneMsg:     "Containers stopped.",
-		cmd:         fmt.Sprintf("cd %s && docker compose stop", sshexec.ShellQuote(deployDir)),
+		cmd:         project.Command() + " stop",
 	})
 }
 
 // RunComposeDown removes the containers and default network for the
 // compose project in deployDir — "docker compose down". Named volumes are
 // left alone (this never passes -v), so persisted data survives.
-func (s *Store) RunComposeDown(target sshexec.Target, deployDir string) *Job {
+func (s *Store) RunComposeDown(target sshexec.Target, project Project) *Job {
 	return s.runCommand(target, commandSpec{
 		checkCmd:    "docker compose version",
 		checkDesc:   "Docker Compose is available",
 		installHint: "Install Docker with the Compose plugin: https://docs.docker.com/compose/install/",
 		verb:        "Removing containers (docker compose down)",
 		doneMsg:     "Containers removed.",
-		cmd:         fmt.Sprintf("cd %s && docker compose down", sshexec.ShellQuote(deployDir)),
+		cmd:         project.Command() + " down",
 	})
 }
 

@@ -1,3 +1,4 @@
+import { TableCard } from "@/components/TableCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getHealth } from "@/lib/api";
 
@@ -7,7 +8,7 @@ export default async function HealthPage() {
   return (
     <div className="flex flex-col gap-8">
       <div>
-        <h1 className="text-xl font-semibold text-text-primary">Health</h1>
+        <h1 className="page-title">Health</h1>
         <p className="mt-1 text-sm text-text-secondary">
           Signals worth a look: repeated pipeline failures, merge requests sitting open too
           long, and runners that changed state.
@@ -15,11 +16,12 @@ export default async function HealthPage() {
       </div>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-text-primary">
+        <h2 className="section-title">
           Failing projects{" "}
           <span className="text-text-muted">({health.failingProjects.length})</span>
         </h2>
-        <table className="w-full border-collapse text-sm">
+        <TableCard>
+      <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-gridline text-left text-text-secondary">
               <th className="py-2 pr-4 font-medium">Project</th>
@@ -55,14 +57,16 @@ export default async function HealthPage() {
             )}
           </tbody>
         </table>
+      </TableCard>
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-text-primary">
+        <h2 className="section-title">
           Stale merge requests{" "}
           <span className="text-text-muted">({health.staleMergeRequests.length})</span>
         </h2>
-        <table className="w-full border-collapse text-sm">
+        <TableCard>
+      <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-gridline text-left text-text-secondary">
               <th className="py-2 pr-4 font-medium">Project</th>
@@ -100,10 +104,11 @@ export default async function HealthPage() {
             )}
           </tbody>
         </table>
+      </TableCard>
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-text-primary">Runner transitions</h2>
+        <h2 className="section-title">Runner transitions</h2>
         <p className="text-sm text-text-muted">
           Only shows flips observed since this backend started — not full history.
         </p>

@@ -1,3 +1,4 @@
+import { TableCard } from "@/components/TableCard";
 import Link from "next/link";
 import { getProjects } from "@/lib/api";
 
@@ -6,9 +7,10 @@ export default async function ProjectsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold text-text-primary">
+      <h1 className="page-title">
         Projects <span className="text-text-muted">({projects.length})</span>
       </h1>
+      <TableCard>
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-gridline text-left text-text-secondary">
@@ -39,6 +41,7 @@ export default async function ProjectsPage() {
           ))}
         </tbody>
       </table>
+      </TableCard>
     </div>
   );
 }

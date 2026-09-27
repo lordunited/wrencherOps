@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"devops-wrapper/internal/promctl"
 	"devops-wrapper/internal/sshexec"
 )
 
@@ -28,10 +29,68 @@ func CheckHealth(target sshexec.Target, svc *Service) (health, detail string) {
 	}
 	defer client.Close()
 
+	if svc.Connected() {
+		return checkConnectedHealth(client, svc)
+	}
 	if svc.Type == "kubernetes" {
 		return checkKubernetesHealth(client, svc)
 	}
 	return checkComposeHealth(client, svc)
+}
+
+// checkConnectedHealth checks a stack the panel didn't deploy. Its compose
+// file may have any name and live anywhere, so containers are found by
+// their compose project label (or, outside Compose, by the pinned
+// container) rather than by running compose in a folder.
+func checkConnectedHealth(client *sshexec.Client, svc *Service) (string, string) {
+	filter := "name=^" + svc.Container + "$"
+	if svc.ComposeProject != "" {
+		filter = "label=com.docker.compose.project=" + svc.ComposeProject
+	}
+	var out strings.Builder
+	cmd := "docker ps -a --filter " + sshexec.ShellQuote(filter) + " --format '{{.Names}}\t{{.State}}\t{{.Status}}'"
+	if err := client.Run(cmd, &out); err != nil {
+		return "unreachable", "docker ps failed: " + err.Error()
+	}
+	var entries []composePsEntry
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		health := ""
+		if strings.Contains(parts[2], "(unhealthy)") {
+			health = "unhealthy"
+		}
+		entries = append(entries, composePsEntry{Service: parts[0], Name: parts[0], State: parts[1], Health: health})
+	}
+	health, detail := summarizeContainers(client, entries)
+	if health != "healthy" {
+		return health, detail
+	}
+	if svc.Type == "nginx" {
+		// Serving isn't enough: the config on disk must also pass nginx -t,
+		// or the next reload or restart would take the site down.
+		out, errOut, err := client.Output("docker exec " + sshexec.ShellQuote(svc.Container) + " nginx -t")
+		if err != nil {
+			lines := strings.Split(strings.TrimSpace(out+errOut), "\n")
+			return "degraded", detail + " — nginx -t fails: " + lines[0]
+		}
+		return "healthy", detail + ", config test passes"
+	}
+	if svc.Type != "prometheus" {
+		return health, detail
+	}
+	// Running containers aren't the whole story: Prometheus itself must be
+	// ready to serve, and running the config it was last given.
+	inst, err := promctl.DiscoverContainer(client, svc.Container)
+	if err != nil {
+		return "degraded", detail + " — Prometheus container not found: " + err.Error()
+	}
+	if ok, why := promctl.Ready(client, inst); !ok {
+		return "degraded", detail + " — Prometheus is not ready: " + why
+	}
+	return "healthy", detail + ", Prometheus ready"
 }
 
 func checkComposeHealth(client *sshexec.Client, svc *Service) (string, string) {
@@ -55,6 +114,12 @@ func checkComposeHealth(client *sshexec.Client, svc *Service) (string, string) {
 		entries = append(entries, entry)
 	}
 
+	return summarizeContainers(client, entries)
+}
+
+// summarizeContainers turns container states into a health verdict and a
+// one-line detail, explaining any container that isn't running cleanly.
+func summarizeContainers(client *sshexec.Client, entries []composePsEntry) (string, string) {
 	if len(entries) == 0 {
 		return "unreachable", "no containers found"
 	}

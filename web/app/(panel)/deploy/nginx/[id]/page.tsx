@@ -1,0 +1,9 @@
+import { ServiceDetail } from "@/components/ServiceDetail";
+import { getService } from "@/lib/api";
+
+export default async function NginxServiceDetailPage(props: PageProps<"/deploy/nginx/[id]">) {
+  const { id } = await props.params;
+  const service = await getService(id);
+
+  return <ServiceDetail initial={service} backHref="/deploy/nginx" backLabel="Nginx" />;
+}

@@ -1,24 +1,70 @@
 @import "tailwindcss";
 
+/*
+ * "Pocket" theme: cool mist ground, white floating cards, one cobalt accent,
+ * pill-shaped controls, and ink-navy log panels. Light is the base palette;
+ * dark mode follows the system setting.
+ */
 :root {
-  --background: #121212;
-  --foreground: #ffffff;
-  --sidebar-bg: #000000;
-  --surface-1: #181818;
-  --surface-hover: #282828;
-  --text-primary: #ffffff;
-  --text-secondary: #b3b3b3;
-  --text-muted: #6a6a6a;
-  --gridline: #2a2a2a;
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.32);
-  --accent: #1db954;
-  --accent-hover: #1ed760;
-  --on-accent: #000000;
-  --status-good: #1db954;
-  --status-warning: #fab219;
-  --status-serious: #ec835a;
-  --status-critical: #e66767;
+  --background: #eef1f8;
+  --foreground: #121a33;
+  --sidebar-bg: #ffffff;
+  --surface-1: #ffffff;
+  --surface-2: #f4f6fc;
+  --surface-hover: #e9edf8;
+  --text-primary: #121a33;
+  --text-secondary: #4a5470;
+  --text-muted: #6b7591;
+  --gridline: #e6eaf4;
+  --border: #e1e6f2;
+  --border-strong: #c9d1e6;
+  --accent: #1d3fd6;
+  --accent-hover: #1733b3;
+  --accent-soft: #e6ebff;
+  --on-accent: #ffffff;
+  --status-good: #12925f;
+  --status-warning: #c7741d;
+  --status-serious: #d9622b;
+  --status-critical: #d93a4a;
+  --log-bg: #0f1630;
+  --log-ink: #c9d3f2;
+  --log-good: #5fe0a8;
+  --card-shadow: 0 1px 2px rgba(18, 26, 51, 0.06), 0 8px 24px rgba(18, 26, 51, 0.06);
+  --tabbar-bg: #121a33;
+  --tabbar-ink: #aeb8d8;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0b1020;
+    --foreground: #eef1fb;
+    --sidebar-bg: #0f1528;
+    --surface-1: #141b31;
+    --surface-2: #1a2340;
+    --surface-hover: #212b4b;
+    --text-primary: #eef1fb;
+    --text-secondary: #b3bbd6;
+    --text-muted: #8791b0;
+    --gridline: #212a47;
+    --border: #242e4d;
+    --border-strong: #35416a;
+    --accent: #6b86ff;
+    --accent-hover: #8aa0ff;
+    --accent-soft: #1f2a55;
+    --on-accent: #0b1020;
+    --status-good: #4fd69c;
+    --status-warning: #f0a54a;
+    --status-serious: #f08457;
+    --status-critical: #ff6b7a;
+    --log-bg: #070b17;
+    --log-ink: #c9d3f2;
+    --log-good: #5fe0a8;
+    --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
+    --tabbar-bg: #1a2340;
+    --tabbar-ink: #9aa5c8;
+    color-scheme: dark;
+  }
 }
 
 @theme inline {
@@ -26,6 +72,7 @@
   --color-foreground: var(--foreground);
   --color-sidebar-bg: var(--sidebar-bg);
   --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
   --color-surface-hover: var(--surface-hover);
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
@@ -35,40 +82,223 @@
   --color-border-strong: var(--border-strong);
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
   --color-on-accent: var(--on-accent);
   --color-status-good: var(--status-good);
   --color-status-warning: var(--status-warning);
   --color-status-serious: var(--status-serious);
   --color-status-critical: var(--status-critical);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --background: #ffffff;
-    --foreground: #000000;
-    --sidebar-bg: #f8f8f8;
-    --surface-1: #f6f6f6;
-    --surface-hover: #ececec;
-    --text-primary: #000000;
-    --text-secondary: #5e5e5e;
-    --text-muted: #8e8e8e;
-    --gridline: #e3e3e3;
-    --border: rgba(0, 0, 0, 0.1);
-    --border-strong: rgba(0, 0, 0, 0.32);
-    --accent: #1db954;
-    --accent-hover: #169c46;
-    --on-accent: #000000;
-    --status-good: #188a3e;
-    --status-warning: #b3790a;
-    --status-serious: #d1613a;
-    --status-critical: #d03b3b;
-  }
+  --color-log-bg: var(--log-bg);
+  --color-log-ink: var(--log-ink);
+  --color-log-good: var(--log-good);
+  --color-tabbar-bg: var(--tabbar-bg);
+  --color-tabbar-ink: var(--tabbar-ink);
+  --shadow-card: var(--card-shadow);
+  --font-sans: var(--font-jakarta);
+  --font-mono: var(--font-jetbrains);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+@layer components {
+  /* A floating white card, the basic Pocket surface. */
+  .card {
+    background: var(--surface-1);
+    border-radius: 1.5rem;
+    box-shadow: var(--card-shadow);
+  }
+
+  /* Form sections: a fieldset drawn as a card. Floating the legend turns it
+     into ordinary content, so it sits inside the card's padding instead of
+     on its top edge. */
+  .card-fieldset {
+    background: var(--surface-1);
+    border-radius: 1.5rem;
+    box-shadow: var(--card-shadow);
+    padding: 1.25rem;
+  }
+  .card-fieldset > legend {
+    float: left;
+    width: 100%;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+  @media (min-width: 640px) {
+    .card-fieldset {
+      padding: 1.5rem;
+    }
+  }
+
+  /* Text inputs, selects and textareas. */
+  .field {
+    border-radius: 0.875rem;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    padding: 0.625rem 0.875rem;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .field:disabled {
+    opacity: 0.6;
+  }
+
+  /* Data tables inside a card. The wrapper scrolls sideways on narrow
+     screens so the page itself never does. */
+  .table-card {
+    background: var(--surface-1);
+    border-radius: 1.5rem;
+    box-shadow: var(--card-shadow);
+    overflow-x: auto;
+  }
+  .table-card table {
+    min-width: 560px;
+  }
+  .table-card th {
+    background: var(--surface-2);
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.75rem 1rem;
+    white-space: nowrap;
+  }
+  .table-card td {
+    padding: 0.75rem 1rem;
+  }
+  .table-card tr {
+    border-color: var(--gridline);
+  }
+  .table-card tbody tr:last-child {
+    border-bottom: 0;
+  }
+  .table-card tbody tr:hover {
+    background: var(--surface-2);
+  }
+
+  /* Page titles. */
+  .page-title {
+    font-size: 1.625rem;
+    line-height: 1.2;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+    text-wrap: balance;
+  }
+  .section-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  /* Command output. */
+  .log-panel {
+    background: var(--log-bg);
+    color: var(--log-ink);
+    border-radius: 1rem;
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 0.75rem;
+    line-height: 1.6;
+  }
+}
+
+/* PromQL editor (CodeMirror): looks like a .field, with a themed
+   suggestion popup and inline error marks. Kept outside @layer and scoped
+   under .cm-editor so it outranks CodeMirror's own injected styles. */
+.promql-editor .cm-editor {
+  border-radius: 0.875rem;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.promql-editor .cm-editor.cm-focused {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.promql-editor .cm-scroller,
+.promql-editor .cm-editor .cm-tooltip {
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+.promql-editor .cm-content {
+  caret-color: var(--text-primary);
+}
+.promql-editor .cm-placeholder {
+  color: var(--text-muted);
+}
+.promql-editor .cm-selectionBackground,
+.promql-editor .cm-focused .cm-selectionBackground {
+  background: var(--accent-soft) !important;
+}
+.promql-editor .cm-editor .cm-tooltip {
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+}
+.promql-editor .cm-editor .cm-tooltip-autocomplete > ul {
+  max-height: 18rem;
+  font-size: 12.5px;
+}
+.promql-editor .cm-editor .cm-tooltip-autocomplete > ul > li {
+  padding: 4px 10px !important;
+}
+.promql-editor .cm-editor .cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.promql-editor .cm-editor .cm-completionDetail {
+  color: var(--text-muted);
+  font-style: normal;
+  margin-left: 0.75rem;
+}
+.promql-editor .cm-editor li[aria-selected] .cm-completionDetail {
+  color: inherit;
+  opacity: 0.8;
+}
+.promql-editor .cm-editor .cm-completionMatchedText {
+  text-decoration: none;
+  font-weight: 700;
+}
+.promql-editor .cm-editor .cm-completionInfo {
+  max-width: 22rem;
+  padding: 8px 10px;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.promql-editor .cm-editor .cm-diagnostic-error {
+  border-left-color: var(--status-critical);
+}
+.promql-editor .cm-editor .cm-lintRange-error {
+  background-image: none;
+  text-decoration: wavy underline var(--status-critical);
+  text-underline-offset: 3px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

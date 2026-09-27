@@ -1,20 +1,34 @@
+// A figure in a card. "hero" fills it with the accent color, for the one
+// number on a page that matters most.
 export function StatTile({
   label,
   value,
   href,
+  hint,
+  hero = false,
 }: {
   label: string;
   value: string;
   href?: string;
+  hint?: string;
+  hero?: boolean;
 }) {
   const content = (
     <>
-      <span className="text-sm text-text-secondary">{label}</span>
-      <span className="text-3xl font-semibold text-text-primary">{value}</span>
+      <span
+        className={`text-[11px] font-bold uppercase tracking-[0.07em] ${hero ? "text-on-accent/75" : "text-text-muted"}`}
+      >
+        {label}
+      </span>
+      <span className={`text-2xl font-extrabold tabular-nums tracking-tight ${hero ? "text-on-accent" : "text-text-primary"}`}>
+        {value}
+      </span>
+      {hint && <span className={`text-xs ${hero ? "text-on-accent/75" : "text-text-muted"}`}>{hint}</span>}
     </>
   );
-  const className =
-    "flex flex-col gap-1 rounded-lg bg-surface-1 px-5 py-4 transition-colors hover:bg-surface-hover";
+  const className = `flex min-w-0 flex-col gap-1 rounded-3xl px-5 py-4 shadow-card transition-transform ${
+    hero ? "bg-accent" : "bg-surface-1"
+  } ${href ? "hover:-translate-y-0.5" : ""}`;
 
   if (!href) {
     return <div className={className}>{content}</div>;

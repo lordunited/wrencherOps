@@ -1,3 +1,4 @@
+import { TableCard } from "@/components/TableCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getUsers } from "@/lib/api";
 import { userStateRole } from "@/lib/format";
@@ -7,9 +8,10 @@ export default async function UsersPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold text-text-primary">
+      <h1 className="page-title">
         Users <span className="text-text-muted">({users.length})</span>
       </h1>
+      <TableCard>
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-gridline text-left text-text-secondary">
@@ -39,6 +41,7 @@ export default async function UsersPage() {
           ))}
         </tbody>
       </table>
+      </TableCard>
     </div>
   );
 }

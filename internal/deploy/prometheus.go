@@ -9,9 +9,9 @@ import (
 // Prometheus, Grafana, Alertmanager, and node_exporter — wired together out
 // of the box: Prometheus scrapes itself, node_exporter, and Alertmanager;
 // alerts route to Alertmanager; Grafana is pre-provisioned with Prometheus
-// as a datasource. All four run from their official images, configured via
-// Compose's inline "configs" (content embedded directly in the compose
-// file, no second file to write over SSH).
+// as a datasource. All four run from their official images. Prometheus reads
+// its config from a folder on the host (see SeedFilesFor); Grafana's
+// datasource uses Compose's inline "configs".
 type PrometheusStackConfig struct {
 	PrometheusPort   int // host port -> container 9090
 	GrafanaPort      int // host port -> container 3000
@@ -55,9 +55,6 @@ func (c PrometheusStackConfig) ComposeYAML() string {
 	fmt.Fprintf(&b, "    image: prom/prometheus:%s\n", c.ImageTag)
 	fmt.Fprintf(&b, "    container_name: %s\n", prom)
 	b.WriteString("    restart: always\n")
-	b.WriteString("    configs:\n")
-	b.WriteString("      - source: prometheus_config\n")
-	b.WriteString("        target: /etc/prometheus/prometheus.yml\n")
 	b.WriteString("    command:\n")
 	b.WriteString("      - '--config.file=/etc/prometheus/prometheus.yml'\n")
 	b.WriteString("      - '--storage.tsdb.path=/prometheus'\n")
@@ -65,6 +62,10 @@ func (c PrometheusStackConfig) ComposeYAML() string {
 	b.WriteString("    ports:\n")
 	fmt.Fprintf(&b, "      - '%d:9090'\n", c.PrometheusPort)
 	b.WriteString("    volumes:\n")
+	// Config lives in a folder on the host rather than inline in this
+	// file, so the panel's rule management can edit it and the edits
+	// survive a redeploy. SeedFilesFor writes the starting files.
+	fmt.Fprintf(&b, "      - '%s/%s:/etc/prometheus'\n", c.DeployDir, PrometheusConfigFolder)
 	fmt.Fprintf(&b, "      - '%s/prometheus-data:/prometheus'\n", c.DeployDir)
 	for _, v := range c.ExtraVolumes {
 		fmt.Fprintf(&b, "      - '%s'\n", v)
@@ -151,24 +152,6 @@ func (c PrometheusStackConfig) ComposeYAML() string {
 	writeNetworksRef(&b, c.Networks)
 
 	b.WriteString("\nconfigs:\n")
-	b.WriteString("  prometheus_config:\n")
-	b.WriteString("    content: |\n")
-	b.WriteString("      global:\n")
-	b.WriteString("        scrape_interval: 15s\n")
-	b.WriteString("      scrape_configs:\n")
-	b.WriteString("        - job_name: 'prometheus'\n")
-	b.WriteString("          static_configs:\n")
-	b.WriteString("            - targets: ['localhost:9090']\n")
-	b.WriteString("        - job_name: 'node-exporter'\n")
-	b.WriteString("          static_configs:\n")
-	b.WriteString("            - targets: ['node-exporter:9100']\n")
-	b.WriteString("        - job_name: 'alertmanager'\n")
-	b.WriteString("          static_configs:\n")
-	b.WriteString("            - targets: ['alertmanager:9093']\n")
-	b.WriteString("      alerting:\n")
-	b.WriteString("        alertmanagers:\n")
-	b.WriteString("          - static_configs:\n")
-	b.WriteString("              - targets: ['alertmanager:9093']\n")
 	b.WriteString("  grafana_datasource:\n")
 	b.WriteString("    content: |\n")
 	b.WriteString("      apiVersion: 1\n")
@@ -198,3 +181,49 @@ func writeNetworksRef(b *strings.Builder, networks []string) {
 		fmt.Fprintf(b, "      - %s\n", n)
 	}
 }
+
+// PrometheusConfigFolder is the folder under the deploy directory holding
+// Prometheus's config and rule files, mounted at /etc/prometheus.
+const PrometheusConfigFolder = "prometheus-config"
+
+// DefaultPrometheusConfig is the prometheus.yml a new stack starts with:
+// scrape Prometheus itself, node_exporter and Alertmanager, send alerts to
+// Alertmanager, and load every rule file under rules/.
+const DefaultPrometheusConfig = `global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - rules/*.yml
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+`
+
+// DefaultAlertRules is the starting rule file: one alert for any scrape
+// target that stops responding.
+const DefaultAlertRules = `groups:
+  - name: availability
+    rules:
+      - alert: InstanceDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.instance }} is down'
+          description: '{{ $labels.job }} target {{ $labels.instance }} has not answered for 5 minutes.'
+`

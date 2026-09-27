@@ -2,52 +2,55 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Brand } from "@/components/Brand";
 import { Icon } from "@/components/icons";
 import { NAV_CATEGORIES } from "@/lib/nav";
 
+// Desktop navigation. On phones the MobileNav tab bar replaces it.
 export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="w-60 shrink-0 border-r border-border bg-sidebar-bg px-3 py-5">
-      <Link href="/" className="flex items-center gap-2 px-2 pb-6">
-        <span className="h-2 w-2 rounded-full bg-accent" aria-hidden />
-        <span className="text-sm font-semibold tracking-wide text-text-primary">
-          DevOps Panel
-        </span>
-      </Link>
-      <nav className="flex flex-col gap-4">
+    <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col gap-6 overflow-y-auto bg-sidebar-bg px-4 py-6 shadow-[1px_0_0_var(--border)] md:flex">
+      <div className="px-2">
+        <Brand />
+      </div>
+      <nav className="flex flex-col gap-5">
+        <Link
+          href="/"
+          className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+            pathname === "/"
+              ? "bg-accent text-on-accent"
+              : "text-text-secondary hover:bg-surface-2 hover:text-text-primary"
+          }`}
+        >
+          <Icon name="home" />
+          Overview
+        </Link>
         {NAV_CATEGORIES.map((category) => (
-          <details key={category.name} open className="group">
-            <summary className="flex cursor-pointer select-none items-center gap-2 rounded px-2 py-1.5 text-xs font-semibold uppercase tracking-wider text-text-muted hover:text-text-secondary">
-              <Icon name={category.icon} className="text-text-muted" />
+          <div key={category.name} className="flex flex-col gap-1">
+            <span className="flex items-center gap-2 px-3 pb-1 text-[11px] font-bold uppercase tracking-[0.08em] text-text-muted">
+              <Icon name={category.icon} size={14} />
               {category.name}
-            </summary>
-            <div className="mt-1 flex flex-col gap-0.5">
-              {category.items.map((item) => {
-                const active = pathname === item.href;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`relative rounded px-2 py-1.5 pl-5 text-sm font-medium transition-colors ${
-                      active
-                        ? "bg-surface-hover text-text-primary"
-                        : "text-text-secondary hover:bg-surface-1 hover:text-text-primary"
-                    }`}
-                  >
-                    {active && (
-                      <span
-                        className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent"
-                        aria-hidden
-                      />
-                    )}
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </div>
-          </details>
+            </span>
+            {category.items.map((item) => {
+              const active = pathname === item.href || pathname.startsWith(item.href + "/");
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  className={`rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
+                    active
+                      ? "bg-accent font-semibold text-on-accent shadow-card"
+                      : "text-text-secondary hover:bg-surface-2 hover:text-text-primary"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
         ))}
       </nav>
     </aside>

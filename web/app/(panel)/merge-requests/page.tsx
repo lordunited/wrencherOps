@@ -1,3 +1,4 @@
+import { TableCard } from "@/components/TableCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getMergeRequests } from "@/lib/api";
 import { mergeRequestRole } from "@/lib/format";
@@ -18,13 +19,14 @@ export default async function MergeRequestsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold text-text-primary">
+      <h1 className="page-title">
         Merge requests <span className="text-text-muted">({grandTotal})</span>
       </h1>
       <p className="text-sm text-text-muted">
         Open merge requests only. Showing the {rows.length} most recent (up to {MAX_ROWS}, up to
         20 per project) across {groups.length} projects.
       </p>
+      <TableCard>
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-gridline text-left text-text-secondary">
@@ -66,6 +68,7 @@ export default async function MergeRequestsPage() {
           ))}
         </tbody>
       </table>
+      </TableCard>
     </div>
   );
 }

@@ -10,11 +10,12 @@ export default async function DeployPrometheusListPage() {
       <DeployTabs basePath="/deploy/prometheus" active="docker" />
       <ServicesTable
         title="Prometheus stack"
-        description="Prometheus, Grafana, Alertmanager, and node_exporter, deployed or configured to be deployed via Docker."
+        description="Monitoring stacks deployed by the panel, and existing Prometheus servers connected to it."
         services={services}
         basePath="/deploy/prometheus"
         newHref="/deploy/prometheus/new"
         newLabel="+ New Prometheus stack"
+        extraAction={{ href: "/deploy/prometheus/connect", label: "Connect existing" }}
       />
     </div>
   );

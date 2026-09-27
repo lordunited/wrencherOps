@@ -18,8 +18,8 @@ export default function PanelError({
   }, [error]);
 
   return (
-    <div className="flex flex-col items-start gap-3 rounded-lg bg-surface-1 p-6">
-      <h2 className="text-sm font-semibold text-text-primary">Couldn&apos;t load this page</h2>
+    <div className="card flex flex-col items-start gap-3 p-6">
+      <h2 className="section-title">Couldn&apos;t load this page</h2>
       <p className="max-w-md text-sm text-text-secondary">
         {error.message || "Something went wrong loading this data."}
       </p>

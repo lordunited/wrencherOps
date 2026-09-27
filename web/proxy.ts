@@ -12,6 +12,11 @@ const SESSION_COOKIE_NAME = "session";
 // pages at all when there's obviously no session.
 export function proxy(request: NextRequest) {
   if (!request.cookies.has(SESSION_COOKIE_NAME)) {
+    // API calls get a 401 their caller can handle; redirecting them would
+    // hand a script the login page's HTML instead of an answer.
+    if (request.nextUrl.pathname.startsWith("/api/")) {
+      return new NextResponse("not authenticated", { status: 401 });
+    }
     return NextResponse.redirect(new URL("/login", request.url));
   }
   return NextResponse.next();

@@ -31,6 +31,7 @@ export const NAV_CATEGORIES: NavCategory[] = [
       { href: "/deploy/gitlab", label: "GitLab" },
       { href: "/deploy/nexus3", label: "Nexus3" },
       { href: "/deploy/prometheus", label: "Prometheus stack" },
+      { href: "/deploy/nginx", label: "Nginx" },
     ],
   },
 ];

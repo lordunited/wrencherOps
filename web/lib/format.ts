@@ -70,6 +70,7 @@ const SERVICE_STATUS_ROLE: Record<string, StatusRole> = {
   removing: "warning",
   down: "muted",
   failed: "critical",
+  connected: "good",
 };
 
 export function serviceStatusRole(status: string): StatusRole {
@@ -85,4 +86,27 @@ const SERVICE_HEALTH_ROLE: Record<string, StatusRole> = {
 
 export function serviceHealthRole(health: string): StatusRole {
   return SERVICE_HEALTH_ROLE[health] ?? "muted";
+}
+
+const LOG_STATUS_ROLE: Record<string, StatusRole> = {
+  running: "warning",
+  success: "good",
+  failed: "critical",
+  healthy: "good",
+  degraded: "warning",
+  unreachable: "critical",
+};
+
+export function logStatusRole(status: string): StatusRole {
+  return LOG_STATUS_ROLE[status] ?? "muted";
+}
+
+// Human-readable duration between two ISO timestamps, e.g. "4s" or "2m 13s".
+export function formatDuration(startIso: string, endIso?: string): string {
+  if (!endIso) return "";
+  const seconds = Math.max(0, Math.round((Date.parse(endIso) - Date.parse(startIso)) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }

@@ -16,7 +16,7 @@ You need:
 - **For every server you want to install tools on:**
   - SSH login with a username and password
   - Docker with the Compose plugin installed
-  - permission for that user to write to the install folder, which defaults to a folder under `/opt`
+  - the SSH user must be `root`, or be allowed to use `sudo` without a password. The panel needs this to create each tool's data folders with the right owner.
 
 ---
 
@@ -157,11 +157,72 @@ Open a service from its list in the **Deploy** section. The buttons at the top c
 
 To change a service's settings, edit the fields or the configuration on its page, click **Save**, then click **Redeploy**.
 
+### Activity history
+
+At the bottom of every service page, **Activity history** lists everything the panel has done on that server for the service. That includes each Deploy, Start, Stop, Down, Delete, and Sync, with the time, the result, and how long it took. The newest entries are at the top.
+
+- Click an entry to read its full output.
+- Click **Download log** to save that output as a text file.
+
+The history is kept after you reload the page or restart the panel. If the panel restarts during an action, that entry is marked **failed** with a note saying it was interrupted.
+
+### Prometheus: Rules & targets
+
+A Prometheus service page has a second tab, **Rules & targets**. It connects to the server and shows what the running Prometheus has actually loaded:
+
+- how many targets are up and down, and which alerts are firing
+- every scrape job, with each target's health and its last error
+- every alert rule and whether it is firing, pending, or quiet
+- the config file and rule files themselves
+
+From there you can:
+
+- **Add targets** to an existing job. Type one per line, and add a note after `#`, for example `172.22.241.34:9100 # vpn node exporter`.
+- **Create a scrape job.** Pick Exporter, Website check, Port check, or SSL certificate. Blackbox jobs pre-fill your blackbox exporter address from your existing jobs.
+- **Add an alert rule** from a template, such as Target down, High CPU, Disk almost full, Website down, or SSL certificate expiring.
+- **Edit a file** directly.
+
+Every change shows you a before and after of each file first. When you click **Apply to server**, the panel checks the change with Prometheus's own checker, saves a backup of each file under `/var/backups/devops-panel/` on the server, writes the change, and reloads Prometheus without restarting it. If Prometheus rejects the change, nothing is written or the old files are put back. Each change is recorded in the Activity history.
+
+If the page says the config lives **inside the container only**, click **Move config to disk** first. Otherwise your changes would be lost on the next redeploy. Prometheus restarts once, with the same configuration it was running.
+
+### Prometheus: Status
+
+The **Status** tab shows what's happening inside Prometheus, read live from the server:
+
+- **Needs attention** at the top: failed config reloads, storage or WAL corruption, failing writes, a disk getting full, failed compactions or checkpoints, failing rules, dropped alerts, or no Alertmanager connected.
+- **TSDB and head block**: series, chunks, the time range held in memory, stored blocks, retention and compactions.
+- **Write-ahead log (WAL)**: size and segments on disk, the current segment, startup replay progress, average fsync time, truncations, checkpoints and corruptions.
+- **Runtime**: uptime, memory, goroutines, file handles and the last config reload.
+- **Rules and alerting**: evaluations and failures, connected Alertmanagers, and notifications sent or dropped.
+- **Where the series come from**: the metrics, labels and label values that make up most of the TSDB.
+- **Build** details and every **startup flag**.
+
+Click **Refresh** to read it again.
+
+Both **Rules & targets** and **Status** open instantly with the last reading the panel saved, marked with its time, and bring in a fresh reading behind it. Changes unlock once the fresh reading has arrived. If the server can't be reached, the saved reading stays on screen with a note saying why.
+
+### Connecting a Prometheus you already run
+
+To manage a Prometheus that was set up by hand, go to **Deploy → Prometheus stack** and click **Connect existing**.
+
+1. Enter the server's address, SSH port, user and password, and click **Find Prometheus**.
+2. The panel lists every Prometheus container on that server. For each one it shows the compose project and file, where the config file lives, and the port and URL prefix. It doesn't matter how the compose file is named or where the config is mounted from.
+3. Pick one, give it a name, and click **Connect**.
+
+A connected Prometheus opens on its **Rules & targets** tab, with everything described above. Search finds jobs, targets and rules, including by the comment next to a target in your config, such as `# vpn node exporter`.
+
+The panel never deploys or deletes a connected stack, and its compose file is shown as a read-only copy. **Remove from panel** removes it from the panel and leaves the server untouched.
+
+**Start, Stop and Down unlock after 5 healthy minutes.** The buttons are visible from the start but greyed out. After you connect, the panel checks the whole stack every 30 seconds by itself: every container must be running and passing its health check, and Prometheus must be ready and running its last config. A card on the page counts up to 5:00. Any failed check restarts the count. Once the stack has been healthy for 5 minutes in a row, the buttons unlock and stay unlocked, and an **Unlock** entry appears in the Activity history. They act on the stack's own Compose project and files, whatever those are called. **Down** keeps named volumes and data.
+
+The SSH user needs access to Docker. To change config files owned by root, it must be `root` or be allowed to use `sudo` without a password. If Prometheus is protected with TLS or a password through a web config file, the panel says so and can't read it yet.
+
 ### Status and health
 
 Each service shows two badges.
 
-- **Status** is the result of the last action. It can be pending, deploying, deployed, starting, stopping, stopped, removing, down, or failed.
+- **Status** is the result of the last action. It can be pending, deploying, deployed, starting, stopping, stopped, removing, down, or failed. A connected Prometheus always shows **connected**.
 - **Health** is the result of the last **Sync**:
   - **healthy** means everything is running
   - **degraded** means something is not running or is failing, and the reason is shown next to it
@@ -186,7 +247,8 @@ Each service shows two badges.
 | GitLab pages show an error | Check `GITLAB_BASE_URL` and `GITLAB_TOKEN`, and make sure the token has not expired |
 | Deploy stops at "Connecting" | Check the host, SSH port, username, and password |
 | "Docker Compose is not available" | Install Docker with the Compose plugin on the target server |
-| Nexus3 is deployed but never becomes healthy | The Nexus data folder on the server must be writable by the Nexus container. Ask your server admin to fix the folder's ownership. |
+| A container fails with "permission denied" | Click **Start** or **Redeploy**. Both fix the owner of the Nexus3, Prometheus, Grafana, and Alertmanager data folders before starting. |
+| "Could not prepare data folders" in the log | The SSH user is not `root` and can't use `sudo` without a password. Use `root`, or allow that user passwordless `sudo`. |
 | A status stays at deploying or stopping after the panel restarted | Click **Sync**, or run the action again |
 | Prometheus stack fails to start with a custom version tag | All four images share one tag. Use `latest`, or a tag that exists for all of them. |
 

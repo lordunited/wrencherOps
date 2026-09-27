@@ -5,6 +5,7 @@ const TABS = [
   { key: "kubernetes", label: "Kubernetes" },
 ] as const;
 
+// A segmented control switching between a tool's Docker and Kubernetes pages.
 export function DeployTabs({
   basePath,
   active,
@@ -13,15 +14,16 @@ export function DeployTabs({
   active: "docker" | "kubernetes";
 }) {
   return (
-    <div className="flex gap-6 border-b-2 border-border-strong">
+    <div className="inline-flex w-fit gap-1 rounded-full bg-surface-1 p-1 shadow-card">
       {TABS.map((tab) => (
         <Link
           key={tab.key}
           href={tab.key === "docker" ? basePath : `${basePath}/kubernetes`}
-          className={`-mb-0.5 border-b-2 px-1 pb-2 text-sm font-medium transition-colors ${
+          aria-current={active === tab.key ? "page" : undefined}
+          className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
             active === tab.key
-              ? "border-accent text-text-primary"
-              : "border-transparent text-text-secondary hover:text-text-primary"
+              ? "bg-accent text-on-accent"
+              : "text-text-secondary hover:text-text-primary"
           }`}
         >
           {tab.label}
