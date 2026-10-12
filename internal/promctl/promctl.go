@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 // Package promctl inspects and changes the configuration of a Prometheus
 // server running in Docker on a remote host, over SSH. It reads what the
 // running Prometheus actually loaded (through its own HTTP API, called from
@@ -82,7 +85,7 @@ type composePsEntry struct {
 // Discover finds the Prometheus container of the compose project in
 // deployDir and reads how it was started.
 func Discover(c *sshexec.Client, deployDir string) (*Instance, error) {
-	out, errOut, err := c.Output("cd " + sshexec.ShellQuote(deployDir) + " && docker compose ps --all --format json")
+	out, errOut, err := c.Output(sshexec.AsRootPrelude + sshexec.ComposeIn(deployDir) + " ps --all --format json")
 	if err != nil {
 		return nil, fmt.Errorf("listing containers in %s failed: %v %s", deployDir, err, strings.TrimSpace(errOut))
 	}
@@ -114,7 +117,7 @@ func Discover(c *sshexec.Client, deployDir string) (*Instance, error) {
 // DiscoverContainer reads how a named Prometheus container was started:
 // its config path, listen port, URL prefix and bind mounts.
 func DiscoverContainer(c *sshexec.Client, name string) (*Instance, error) {
-	out, errOut, err := c.Output("docker inspect --format '{{json .}}' " + sshexec.ShellQuote(name))
+	out, errOut, err := c.Output(sshexec.AsRoot("docker inspect --format '{{json .}}' " + sshexec.ShellQuote(name)))
 	if err != nil {
 		return nil, fmt.Errorf("container %s not found on the server: %v %s", name, err, strings.TrimSpace(errOut))
 	}
@@ -205,9 +208,9 @@ type Candidate struct {
 
 // FindAll lists every Prometheus container on the server, running or not.
 func FindAll(c *sshexec.Client) ([]Candidate, error) {
-	out, errOut, err := c.Output("docker ps -a --format '{{.Names}}\t{{.Image}}'")
+	out, errOut, err := c.Output(sshexec.AsRoot("docker ps -a --format '{{.Names}}\t{{.Image}}'"))
 	if err != nil {
-		return nil, fmt.Errorf("listing containers failed (the SSH user needs access to Docker): %v %s", err, strings.TrimSpace(errOut))
+		return nil, fmt.Errorf("listing containers failed (the SSH user needs access to Docker, directly or via sudo): %v %s", err, strings.TrimSpace(errOut))
 	}
 	candidates := []Candidate{}
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
@@ -321,7 +324,7 @@ func listenPort(addr string) string {
 // is published on the host.
 func api(c *sshexec.Client, inst *Instance, endpoint string, into any) error {
 	url := fmt.Sprintf("http://127.0.0.1:%s%s/api/v1/%s", inst.Port, inst.RoutePrefix, endpoint)
-	out, errOut, err := c.Output("docker exec " + sshexec.ShellQuote(inst.Container) + " wget -qO- " + sshexec.ShellQuote(url))
+	out, errOut, err := c.Output(sshexec.AsRoot("docker exec " + sshexec.ShellQuote(inst.Container) + " wget -qO- " + sshexec.ShellQuote(url)))
 	if err != nil {
 		if inst.WebConfig != "" {
 			return fmt.Errorf("Prometheus API %s: this Prometheus uses a web config file (%s) for TLS or a password, which the panel can't use yet: %s",
@@ -364,7 +367,7 @@ func readFiles(c *sshexec.Client, inst *Instance, patterns []string) ([]File, er
 		return nil, nil
 	}
 	script := `for P in "$@"; do for f in $P; do [ -f "$f" ] && printf '%s %s\n' "$f" "$(base64 < "$f" | tr -d '\n')"; done; done; true`
-	cmd := "docker exec " + sshexec.ShellQuote(inst.Container) + " sh -c " + sshexec.ShellQuote(script) + " sh"
+	cmd := sshexec.AsRoot("docker exec " + sshexec.ShellQuote(inst.Container) + " sh -c " + sshexec.ShellQuote(script) + " sh")
 	for _, p := range patterns {
 		cmd += " " + sshexec.ShellQuote(p)
 	}
@@ -625,14 +628,14 @@ func APIGet(ctx context.Context, c *sshexec.Client, inst *Instance, pathAndQuery
 		}
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%s%s%s", inst.Port, inst.RoutePrefix, pathAndQuery)
-	out, errOut, err := c.Output("docker exec " + sshexec.ShellQuote(inst.Container) + " wget -qO- " + sshexec.ShellQuote(url))
+	out, errOut, err := c.Output(sshexec.AsRoot("docker exec " + sshexec.ShellQuote(inst.Container) + " wget -qO- " + sshexec.ShellQuote(url)))
 	if err != nil {
 		// wget drops the body of an error response, so for a query ask
 		// promtool, which prints Prometheus's own explanation.
 		if q, ok := queryParam(pathAndQuery); ok {
 			server := fmt.Sprintf("http://127.0.0.1:%s%s", inst.Port, inst.RoutePrefix)
-			_, pErr, qErr := c.Output("docker exec " + sshexec.ShellQuote(inst.Container) + " promtool query instant " +
-				sshexec.ShellQuote(server) + " " + sshexec.ShellQuote(q))
+			_, pErr, qErr := c.Output(sshexec.AsRoot("docker exec " + sshexec.ShellQuote(inst.Container) + " promtool query instant " +
+				sshexec.ShellQuote(server) + " " + sshexec.ShellQuote(q)))
 			if msg := strings.TrimSpace(pErr); qErr != nil && msg != "" {
 				body, _ := json.Marshal(map[string]string{"status": "error", "errorType": "bad_data", "error": cleanPromtoolError(msg)})
 				return http.StatusBadRequest, body, nil
@@ -675,7 +678,7 @@ func cleanPromtoolError(msg string) string {
 // running the config it was last given. why explains a false result.
 func Ready(c *sshexec.Client, inst *Instance) (ok bool, why string) {
 	url := fmt.Sprintf("http://127.0.0.1:%s%s/-/ready", inst.Port, inst.RoutePrefix)
-	if _, errOut, err := c.Output("docker exec " + sshexec.ShellQuote(inst.Container) + " wget -qO- " + sshexec.ShellQuote(url)); err != nil {
+	if _, errOut, err := c.Output(sshexec.AsRoot("docker exec " + sshexec.ShellQuote(inst.Container) + " wget -qO- " + sshexec.ShellQuote(url))); err != nil {
 		msg := strings.TrimSpace(errOut)
 		if msg == "" {
 			msg = err.Error()

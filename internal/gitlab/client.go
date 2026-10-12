@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 // Package gitlab wraps the GitLab API for the endpoints this tool exposes.
 package gitlab
 

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 export function compactNumber(value: number): string {
   return new Intl.NumberFormat("en-US", { notation: "compact" }).format(value);
 }
@@ -79,9 +82,14 @@ export function serviceStatusRole(status: string): StatusRole {
 
 const SERVICE_HEALTH_ROLE: Record<string, StatusRole> = {
   healthy: "good",
+  starting: "warning",
   degraded: "warning",
   unreachable: "critical",
   unknown: "muted",
+  "not deployed": "muted",
+  down: "muted",
+  paused: "warning",
+  stopped: "muted",
 };
 
 export function serviceHealthRole(health: string): StatusRole {
@@ -93,6 +101,7 @@ const LOG_STATUS_ROLE: Record<string, StatusRole> = {
   success: "good",
   failed: "critical",
   healthy: "good",
+  starting: "warning",
   degraded: "warning",
   unreachable: "critical",
 };
@@ -109,4 +118,37 @@ export function formatDuration(startIso: string, endIso?: string): string {
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+export function bytesLabel(b: number): string {
+  if (!Number.isFinite(b) || b < 1024) return `${Math.max(0, Math.round(b || 0))} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB", "PiB"];
+  let v = b / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v >= 100 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, "")} ${units[i]}`;
+}
+
+export function timeAgo(iso?: string): string {
+  if (!iso) return "never";
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} d ago`;
+}
+
+export function uptimeLabel(seconds: number): string {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+// usageRole colors a percentage: fine, getting full, nearly full.
+export function usageRole(percent: number, warn = 85, crit = 95): StatusRole {
+  return percent >= crit ? "critical" : percent >= warn ? "warning" : "good";
 }

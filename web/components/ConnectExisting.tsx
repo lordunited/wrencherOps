@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 "use client";
 
 import { useState, type FormEvent } from "react";
@@ -6,12 +9,12 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/Button";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { NginxCandidate, PromCandidate, Service } from "@/lib/api";
+import type { GitLabCandidate, HAProxyCandidate, NginxCandidate, PromCandidate, Service } from "@/lib/api";
 
 const LABEL = "flex flex-col gap-1.5 text-sm font-medium text-text-secondary";
 
-type Kind = "prometheus" | "nginx";
-type Candidate = PromCandidate & Partial<NginxCandidate>;
+type Kind = "prometheus" | "nginx" | "haproxy" | "envoy" | "gitlab";
+type Candidate = PromCandidate & Partial<NginxCandidate> & Partial<HAProxyCandidate> & Partial<GitLabCandidate>;
 
 const COPY: Record<Kind, { title: string; intro: string; label: string; back: string; list: string; tab: string }> = {
   prometheus: {
@@ -31,6 +34,33 @@ const COPY: Record<Kind, { title: string; intro: string; label: string; back: st
     back: "Nginx",
     list: "/deploy/nginx",
     tab: "nginx",
+  },
+  haproxy: {
+    title: "Connect an existing HAProxy",
+    intro:
+      "The panel looks for HAProxy containers on the server, however they were set up: any compose file, any folder, config mounted from anywhere. Its config is arbitrary, so on connecting the panel reads it and works out the best way to check it's healthy — a monitor-uri, else its stats page, else just whether a bound port answers at all.",
+    label: "HAProxy",
+    back: "HAProxy",
+    list: "/deploy/haproxy",
+    tab: "service",
+  },
+  envoy: {
+    title: "Connect an existing Envoy",
+    intro:
+      "The panel looks for Envoy containers on the server (envoyproxy/envoy and its distroless and contrib builds), however they were set up: any compose file, any folder, any bootstrap path. It reads the one you pick — its routes, clusters and the live health of every endpoint from its admin API — and validates any config change with Envoy itself before applying it.",
+    label: "Envoy",
+    back: "Envoy",
+    list: "/deploy/envoy",
+    tab: "envoy",
+  },
+  gitlab: {
+    title: "Connect an existing GitLab",
+    intro:
+      "The panel looks for GitLab containers on the server (CE, EE or JH), however they were set up: any compose file, any folder, any external URL or port. It watches the one you pick — every service inside it, via gitlab-ctl — and never deploys, changes or removes it.",
+    label: "GitLab",
+    back: "GitLab",
+    list: "/deploy/gitlab",
+    tab: "service",
   },
 };
 
@@ -139,13 +169,14 @@ export function ConnectExisting({ kind }: { kind: Kind }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="off"
-              required
+              placeholder="leave empty to use the saved one"
             />
           </label>
         </div>
         <p className="text-xs text-text-muted">
           The user needs access to Docker on that server. To change config files owned by root, it must be root or be
-          allowed to use sudo without a password. The password is saved encrypted when you connect.
+          allowed to use sudo (with this same password if it asks). Once it logs in, the password is saved encrypted for
+          this server; leave it empty if it&apos;s already saved.
         </p>
         <Button type="submit" className="w-fit" disabled={searching}>
           {searching ? `Looking for ${copy.label}…` : `Find ${copy.label}`}
@@ -202,35 +233,83 @@ export function ConnectExisting({ kind }: { kind: Kind }) {
                         <dd className="break-all font-mono text-text-secondary">{c.composeFiles.join(", ")}</dd>
                       </>
                     )}
-                    <dt className="text-text-muted">Config</dt>
-                    <dd className="break-all font-mono text-text-secondary">
-                      {c.configPath}
-                      {c.configHostPath ? (
-                        <span className="font-sans text-status-good"> · on disk at {c.configHostPath}</span>
-                      ) : (
-                        <span className="font-sans text-status-warning"> · inside the container only</span>
-                      )}
-                    </dd>
-                    {kind === "nginx" ? (
+                    {kind === "gitlab" ? (
                       <>
-                        <dt className="text-text-muted">conf.d</dt>
-                        <dd className="break-all font-mono text-text-secondary">
-                          /etc/nginx/conf.d
-                          {c.confDHostPath ? (
-                            <span className="font-sans text-status-good"> · on disk at {c.confDHostPath}</span>
-                          ) : (
-                            <span className="font-sans text-status-warning"> · inside the container only</span>
-                          )}
+                        {[
+                          ["Config", "/etc/gitlab", c.configHostPath],
+                          ["Data", "/var/opt/gitlab", c.dataHostPath],
+                        ].map(([label, dir, host]) => (
+                          <div key={label} className="contents">
+                            <dt className="text-text-muted">{label}</dt>
+                            <dd className="break-all font-mono text-text-secondary">
+                              {dir}
+                              {host ? (
+                                <span className="font-sans text-status-good"> · on disk at {host}</span>
+                              ) : (
+                                <span className="font-sans text-text-muted"> · not a server folder (a Docker volume, or inside the container only)</span>
+                              )}
+                            </dd>
+                          </div>
+                        ))}
+                        <dt className="text-text-muted">Health</dt>
+                        <dd className="font-sans text-text-secondary">
+                          Checked with gitlab-ctl status: every service inside the container (puma, sidekiq, gitaly,
+                          postgresql, …) must be running.
+                        </dd>
+                      </>
+                    ) : kind === "envoy" ? (
+                      <>
+                        <dt className="text-text-muted">Bootstrap</dt>
+                        <dd className="break-all font-mono text-text-secondary">{c.configPath}</dd>
+                        <dt className="text-text-muted">Health</dt>
+                        <dd className="font-sans text-text-secondary">
+                          Read from its admin API (if its config has one): Envoy&apos;s own state, and whether each
+                          cluster endpoint passes its health checks.
+                        </dd>
+                      </>
+                    ) : kind === "haproxy" ? (
+                      <>
+                        <dt className="text-text-muted">Config</dt>
+                        <dd className="break-all font-mono text-text-secondary">{(c.configPaths ?? []).join(", ")}</dd>
+                        <dt className="text-text-muted">Health probe</dt>
+                        <dd className="font-sans text-text-secondary">
+                          Determined after connecting, from whatever the config actually defines — a monitor-uri, else
+                          its stats page, else just whether a bound port answers.
                         </dd>
                       </>
                     ) : (
                       <>
-                        <dt className="text-text-muted">API</dt>
-                        <dd className="font-mono text-text-secondary">
-                          port {c.port}
-                          {c.routePrefix ? `, under ${c.routePrefix}` : ""}
-                          {c.webConfig && <span className="font-sans text-status-warning"> · uses TLS or a password; may not be readable</span>}
+                        <dt className="text-text-muted">Config</dt>
+                        <dd className="break-all font-mono text-text-secondary">
+                          {c.configPath}
+                          {c.configHostPath ? (
+                            <span className="font-sans text-status-good"> · on disk at {c.configHostPath}</span>
+                          ) : (
+                            <span className="font-sans text-status-warning"> · inside the container only</span>
+                          )}
                         </dd>
+                        {kind === "nginx" ? (
+                          <>
+                            <dt className="text-text-muted">conf.d</dt>
+                            <dd className="break-all font-mono text-text-secondary">
+                              /etc/nginx/conf.d
+                              {c.confDHostPath ? (
+                                <span className="font-sans text-status-good"> · on disk at {c.confDHostPath}</span>
+                              ) : (
+                                <span className="font-sans text-status-warning"> · inside the container only</span>
+                              )}
+                            </dd>
+                          </>
+                        ) : (
+                          <>
+                            <dt className="text-text-muted">API</dt>
+                            <dd className="font-mono text-text-secondary">
+                              port {c.port}
+                              {c.routePrefix ? `, under ${c.routePrefix}` : ""}
+                              {c.webConfig && <span className="font-sans text-status-warning"> · uses TLS or a password; may not be readable</span>}
+                            </dd>
+                          </>
+                        )}
                       </>
                     )}
                   </dl>

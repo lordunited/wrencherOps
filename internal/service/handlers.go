@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package service
 
 import (
@@ -8,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"devops-wrapper/internal/deploy"
@@ -18,15 +22,23 @@ import (
 
 type Handler struct {
 	services  *Store
+	apps      *AppStore
 	logs      *LogStore
 	jobs      *deploy.Store
 	secrets   *secretbox.Box
 	snapshots *SnapshotStore
 	promPool  promConnPool
+	// checking holds the IDs of services whose health check is running, so
+	// the monitor and an on-demand check never overlap on one service.
+	checking sync.Map
 }
 
-func NewHandler(services *Store, logs *LogStore, snapshots *SnapshotStore, jobs *deploy.Store, secrets *secretbox.Box) *Handler {
-	return &Handler{services: services, logs: logs, snapshots: snapshots, jobs: jobs, secrets: secrets}
+func NewHandler(services *Store, apps *AppStore, logs *LogStore, snapshots *SnapshotStore, jobs *deploy.Store, secrets *secretbox.Box) *Handler {
+	h := &Handler{services: services, apps: apps, logs: logs, snapshots: snapshots, jobs: jobs, secrets: secrets}
+	// Every new service gets its first health check right away, rather
+	// than showing "unknown" until someone presses Sync.
+	services.onCreate = h.checkSoon
+	return h
 }
 
 // resolvePassword returns the password to use for this action: the one
@@ -34,29 +46,50 @@ func NewHandler(services *Store, logs *LogStore, snapshots *SnapshotStore, jobs 
 // saved one decrypted, if there is one.
 func (h *Handler) resolvePassword(ctx context.Context, svc *Service, supplied string) (string, error) {
 	if supplied != "" {
-		encrypted, err := h.secrets.Encrypt(supplied)
-		if err != nil {
-			return "", err
-		}
-		if _, err := h.services.Update(ctx, svc.ID, func(s *Service) {
-			s.EncryptedPassword = encrypted
-		}); err != nil {
+		// Saved — for every service on this server login — only once it
+		// has logged in; a refused one is an error and changes nothing.
+		if err := h.verifyAndRemember(ctx, svc.Host, svc.Port, svc.Username, supplied); err != nil {
 			return "", err
 		}
 		return supplied, nil
 	}
-	if svc.EncryptedPassword == "" {
-		return "", fmt.Errorf("no password supplied and none saved for this service")
+	if svc.EncryptedPassword != "" {
+		return h.secrets.Decrypt(svc.EncryptedPassword)
 	}
-	return h.secrets.Decrypt(svc.EncryptedPassword)
+	// Saved for another service on the same server: that's this one's too.
+	pw, err := h.savedLogin(ctx, svc.Host, svc.Port, svc.Username)
+	if err != nil {
+		return "", err
+	}
+	if pw == "" {
+		return "", fmt.Errorf("no SSH password is saved for %s@%s yet; enter it once and it's saved for every service on that server", svc.Username, svc.Host)
+	}
+	return pw, nil
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+// routeMux is what RegisterRoutes needs from a mux; *http.ServeMux is one.
+// It's an interface so a test can record every pattern registered.
+type routeMux interface {
+	HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request))
+}
+
+// PathPrefixes are the URL prefixes RegisterRoutes serves. The server
+// mounts the handler under exactly these, so a route added under any other
+// prefix would never be reached — TestRoutesStayUnderPathPrefixes fails
+// instead of that route 404ing in production.
+func (h *Handler) PathPrefixes() []string {
+	return []string{"/api/services", "/api/services/", "/api/apps", "/api/apps/"}
+}
+
+func (h *Handler) RegisterRoutes(mux routeMux) {
 	mux.HandleFunc("GET /api/services", h.handleList)
 	mux.HandleFunc("POST /api/services/gitlab", h.handleCreateGitLab)
 	mux.HandleFunc("POST /api/services/nexus3", h.handleCreateNexus3)
 	mux.HandleFunc("POST /api/services/prometheus", h.handleCreatePrometheus)
 	mux.HandleFunc("POST /api/services/nginx", h.handleCreateNginx)
+	mux.HandleFunc("POST /api/services/haproxy", h.handleCreateHAProxy)
+	mux.HandleFunc("POST /api/services/envoy", h.handleCreateEnvoy)
+	mux.HandleFunc("POST /api/services/signoz", h.handleCreateSigNoz)
 	mux.HandleFunc("POST /api/services/docker", h.handleCreateDocker)
 	mux.HandleFunc("POST /api/services/kubernetes", h.handleCreateKubernetes)
 	mux.HandleFunc("POST /api/services/connect/discover", h.handleConnectDiscover)
@@ -74,6 +107,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/services/{id}/logs/{logId}", h.handleGetLog)
 	h.registerPrometheusRoutes(mux)
 	h.registerNginxRoutes(mux)
+	h.registerHAProxyRoutes(mux)
+	h.registerEnvoyRoutes(mux)
+	h.registerAppRoutes(mux)
 }
 
 // maxListedLogs is how many history entries a service's log list returns.
@@ -97,8 +133,12 @@ func (h *Handler) handleGetLog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, entry, nil)
 }
 
+// handleList lists the services in the tabs the user can see.
 func (h *Handler) handleList(w http.ResponseWriter, r *http.Request) {
 	services, err := h.services.List(r.Context())
+	if err == nil {
+		services, err = h.visibleServices(r.Context(), services)
+	}
 	writeJSON(w, services, err)
 }
 
@@ -508,6 +548,89 @@ func (h *Handler) handleCreateNginx(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, svc, nil)
 }
 
+type createHAProxyRequest struct {
+	Name      string `json:"name"`
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	Username  string `json:"username"`
+	DeployDir string `json:"deployDir"`
+
+	HTTPPort      int      `json:"httpPort"`
+	HTTPSPort     int      `json:"httpsPort"`
+	ImageTag      string   `json:"imageTag"`
+	ContainerName string   `json:"containerName"`
+	Networks      []string `json:"networks"`
+	ExtraVolumes  []string `json:"extraVolumes"`
+	CPULimit      string   `json:"cpuLimit"`
+	MemoryLimit   string   `json:"memoryLimit"`
+}
+
+func (h *Handler) handleCreateHAProxy(w http.ResponseWriter, r *http.Request) {
+	var req createHAProxyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Port == 0 {
+		req.Port = 22
+	}
+	if req.DeployDir == "" {
+		req.DeployDir = "/opt/haproxy"
+	}
+	if req.HTTPPort == 0 {
+		req.HTTPPort = 80
+	}
+	if req.ImageTag == "" {
+		req.ImageTag = "lts-alpine"
+	}
+	if req.ContainerName == "" {
+		req.ContainerName = "haproxy"
+	}
+	if req.Name == "" {
+		req.Name = req.Host
+	}
+	var missing []string
+	if req.Host == "" {
+		missing = append(missing, "host")
+	}
+	if req.Username == "" {
+		missing = append(missing, "username")
+	}
+	if len(missing) > 0 {
+		http.Error(w, "missing or invalid fields: "+strings.Join(missing, ", "), http.StatusBadRequest)
+		return
+	}
+
+	manifest := deploy.HAProxyConfig{
+		HTTPPort:      req.HTTPPort,
+		HTTPSPort:     req.HTTPSPort,
+		ImageTag:      req.ImageTag,
+		DeployDir:     strings.TrimRight(req.DeployDir, "/"),
+		ContainerName: req.ContainerName,
+		Networks:      req.Networks,
+		ExtraVolumes:  req.ExtraVolumes,
+		CPULimit:      req.CPULimit,
+		MemoryLimit:   req.MemoryLimit,
+	}.ComposeYAML()
+
+	svc := &Service{
+		Name:      req.Name,
+		Type:      "haproxy",
+		Host:      req.Host,
+		Port:      req.Port,
+		Username:  req.Username,
+		DeployDir: req.DeployDir,
+		Manifest:  manifest,
+		Status:    StatusPending,
+	}
+	if err := h.services.Create(r.Context(), svc); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, svc, nil)
+}
+
 // createRawRequest is shared by the "bring your own YAML" service types:
 // a raw docker-compose file or a raw Kubernetes manifest, applied as-is
 // with no generation step.
@@ -612,10 +735,22 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if current, ok := h.services.Get(r.Context(), r.PathValue("id")); ok && current.Connected() &&
+	if current, ok := h.services.Get(r.Context(), r.PathValue("id")); ok &&
 		(req.Manifest != nil && *req.Manifest != current.Manifest || req.DeployDir != nil && *req.DeployDir != current.DeployDir) {
-		http.Error(w, "a connected stack's compose file and folder belong to the server; change them there", http.StatusBadRequest)
-		return
+		if current.Connected() {
+			http.Error(w, "a connected stack's compose file and folder belong to the server; change them there", http.StatusBadRequest)
+			return
+		}
+		if current.AppID != "" {
+			http.Error(w, "this server's compose file and folder belong to its app; change them on the app, which updates every server", http.StatusBadRequest)
+			return
+		}
+		if current.Type == "signoz" && req.Manifest != nil {
+			if _, err := deploy.ValidateCasting(*req.Manifest); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
 	}
 	svc, err := h.services.Update(r.Context(), r.PathValue("id"), func(s *Service) {
 		if req.Name != nil {
@@ -691,7 +826,18 @@ func (h *Handler) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	target := sshexec.Target{Host: svc.Host, Port: svc.Port, Username: svc.Username, Password: password}
 
 	var job *deploy.Job
-	if svc.Type == "kubernetes" {
+	if svc.AppID != "" {
+		// A server of a custom compose app deploys the app's whole project —
+		// its compose, .env and other files — not just its own copy.
+		app, ok := h.apps.Get(r.Context(), svc.AppID)
+		if !ok {
+			http.Error(w, "this server's app no longer exists", http.StatusConflict)
+			return
+		}
+		job = h.jobs.RunComposeProject(target, app.Manifest, app.DeployDir, app.ComposeFile, app.deployFiles())
+	} else if svc.Type == "signoz" {
+		job = h.jobs.RunSigNoz(target, svc.DeployDir, svc.Manifest)
+	} else if svc.Type == "kubernetes" {
 		job = h.jobs.RunKubernetesApply(target, svc.Manifest, svc.DeployDir)
 	} else {
 		// Starter config files only matter when the compose file mounts
@@ -847,7 +993,7 @@ func (h *Handler) handleDestroy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	target := sshexec.Target{Host: svc.Host, Port: svc.Port, Username: svc.Username, Password: password}
-	job := h.jobs.RunComposeDestroy(target, svc.DeployDir)
+	job := h.jobs.RunComposeDestroy(target, svc.ComposeDir(), svc.DeployDir)
 	jobID := job.Snapshot().ID
 	h.startLog(r.Context(), svc, "destroy", job)
 
@@ -890,6 +1036,9 @@ func (h *Handler) watchJob(serviceID string, job *deploy.Job, successStatus Stat
 		finalStatus = StatusFailed
 	}
 	h.services.Update(ctx, serviceID, func(s *Service) { s.Status = finalStatus })
+	// Whatever the job did (deploy, start, stop, down), the health shown
+	// should be what's on the server now, not from before it.
+	h.checkSoon(serviceID)
 }
 
 // startLog records a just-started job in the service's saved history. A
@@ -954,10 +1103,10 @@ func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 
 	target := sshexec.Target{Host: svc.Host, Port: svc.Port, Username: svc.Username, Password: password}
 	startedAt := time.Now()
-	health, detail := CheckHealth(target, svc)
+	health, detail, stats := CheckHealth(target, svc)
 
 	h.recordSync(r.Context(), svc, health, detail, startedAt, time.Now())
-	updated, err := h.recordHealth(r.Context(), id, health, detail)
+	updated, err := h.recordHealth(r.Context(), id, health, detail, stats)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -997,4 +1146,79 @@ func writeJSON(w http.ResponseWriter, data any, err error) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
+}
+
+type createSigNozRequest struct {
+	Name      string `json:"name"`
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	Username  string `json:"username"`
+	DeployDir string `json:"deployDir"`
+	Casting   string `json:"casting"`
+}
+
+// handleCreateSigNoz creates a SigNoz service. Its manifest is the Foundry
+// casting.yaml; Deploy installs foundryctl, forges the stack from it, and
+// starts it (see deploy.RunSigNoz).
+func (h *Handler) handleCreateSigNoz(w http.ResponseWriter, r *http.Request) {
+	var req createSigNozRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	req.Host, req.Username = strings.TrimSpace(req.Host), strings.TrimSpace(req.Username)
+	if req.Port == 0 {
+		req.Port = 22
+	}
+	if strings.TrimSpace(req.DeployDir) == "" {
+		req.DeployDir = "/opt/signoz"
+	}
+	req.DeployDir = strings.TrimRight(strings.TrimSpace(req.DeployDir), "/")
+	if strings.TrimSpace(req.Casting) == "" {
+		req.Casting = deploy.SigNozDefaultCasting
+	}
+	if req.Name == "" {
+		req.Name = req.Host
+	}
+	if req.Host == "" || req.Username == "" {
+		http.Error(w, "missing or invalid fields: host, username", http.StatusBadRequest)
+		return
+	}
+	project, err := deploy.ValidateCasting(req.Casting)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	all, err := h.services.List(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	for _, s := range all {
+		if s.Host != req.Host {
+			continue
+		}
+		if strings.TrimRight(s.DeployDir, "/") == req.DeployDir {
+			http.Error(w, fmt.Sprintf("%s already runs %q in %s; choose another deploy folder", req.Host, s.Name, req.DeployDir), http.StatusConflict)
+			return
+		}
+		if s.Type == "signoz" {
+			if other, _ := deploy.ValidateCasting(s.Manifest); other == project {
+				http.Error(w, fmt.Sprintf("%s already runs SigNoz %q as project %q; a second one needs another metadata.name (and other ports) in its casting", req.Host, s.Name, project), http.StatusConflict)
+				return
+			}
+		}
+	}
+
+	svc := &Service{
+		Name: req.Name, Type: "signoz", Host: req.Host, Port: req.Port, Username: req.Username,
+		DeployDir: req.DeployDir, Manifest: req.Casting, Status: StatusPending,
+	}
+	if err := h.services.Create(r.Context(), svc); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, svc, nil)
 }

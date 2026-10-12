@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package gitlab
 
 import (
@@ -8,7 +11,9 @@ import (
 )
 
 // RegisterRoutes wires the GitLab endpoints onto mux under /api/gitlab.
-func (c *Client) RegisterRoutes(mux *http.ServeMux) {
+func (c *Client) RegisterRoutes(mux interface {
+	HandleFunc(string, func(http.ResponseWriter, *http.Request))
+}) {
 	mux.HandleFunc("GET /api/gitlab/projects", c.handleListProjects)
 	mux.HandleFunc("GET /api/gitlab/runners", c.handleListRunners)
 	mux.HandleFunc("GET /api/gitlab/users", c.handleListUsers)
@@ -100,7 +105,7 @@ func projectIDFromRequest(w http.ResponseWriter, r *http.Request) (int64, bool) 
 func writeJSON(w http.ResponseWriter, data any, err error) {
 	if err != nil {
 		log.Printf("gitlab: %v", err)
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		http.Error(w, explain(err), http.StatusBadGateway)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

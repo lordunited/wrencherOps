@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package service
 
 import (
@@ -8,6 +11,9 @@ import (
 	"time"
 
 	"devops-wrapper/internal/dockerx"
+	"devops-wrapper/internal/envoyctl"
+	"devops-wrapper/internal/gitlabctl"
+	"devops-wrapper/internal/haproxyctl"
 	"devops-wrapper/internal/nginxctl"
 	"devops-wrapper/internal/promctl"
 	"devops-wrapper/internal/sshexec"
@@ -20,27 +26,11 @@ import (
 // and configured, never deployed, stopped or removed.
 
 type connectTarget struct {
-	Kind     string `json:"kind"` // "prometheus" (default) or "nginx"
+	Kind     string `json:"kind"` // "prometheus" (default), "nginx", "haproxy", "envoy" or "gitlab"
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
 	Username string `json:"username"`
 	Password string `json:"password"`
-}
-
-func (t *connectTarget) dial() (*sshexec.Client, error) {
-	if t.Port == 0 {
-		t.Port = 22
-	}
-	t.Host = strings.TrimSpace(t.Host)
-	t.Username = strings.TrimSpace(t.Username)
-	if t.Host == "" || t.Username == "" || t.Password == "" {
-		return nil, fmt.Errorf("enter the server's address, SSH user and password")
-	}
-	client, err := sshexec.Dial(sshexec.Target{Host: t.Host, Port: t.Port, Username: t.Username, Password: t.Password})
-	if err != nil {
-		return nil, fmt.Errorf("SSH connection failed: %v", err)
-	}
-	return client, nil
 }
 
 type discoverResponse struct {
@@ -56,7 +46,7 @@ func (h *Handler) handleConnectDiscover(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	client, err := req.dial()
+	client, err := h.dialTarget(r.Context(), &req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -64,9 +54,16 @@ func (h *Handler) handleConnectDiscover(w http.ResponseWriter, r *http.Request) 
 	defer client.Close()
 
 	var candidates any
-	if req.Kind == "nginx" {
+	switch req.Kind {
+	case "nginx":
 		candidates, err = nginxctl.FindAll(client)
-	} else {
+	case "haproxy":
+		candidates, err = haproxyctl.FindAll(client)
+	case "envoy":
+		candidates, err = envoyctl.FindAll(client)
+	case "gitlab":
+		candidates, err = gitlabctl.FindAll(client)
+	default:
 		candidates, err = promctl.FindAll(client)
 	}
 	if err != nil {
@@ -106,10 +103,10 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(req.Container) == "" {
-		http.Error(w, "pick a Prometheus container", http.StatusBadRequest)
+		http.Error(w, "pick a container to connect", http.StatusBadRequest)
 		return
 	}
-	client, err := req.dial()
+	client, err := h.dialTarget(r.Context(), &req.connectTarget)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -117,11 +114,23 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	defer client.Close()
 
 	if id, ok := h.connectedOn(r, req.Host)[req.Container]; ok {
-		http.Error(w, fmt.Sprintf("this Prometheus is already connected (service %s)", id), http.StatusConflict)
+		http.Error(w, fmt.Sprintf("this %s is already connected (service %s)", req.Kind, id), http.StatusConflict)
 		return
 	}
 	if req.Kind == "nginx" {
 		h.connectNginx(w, r, req, client)
+		return
+	}
+	if req.Kind == "haproxy" {
+		h.connectHAProxy(w, r, req, client)
+		return
+	}
+	if req.Kind == "envoy" {
+		h.connectEnvoy(w, r, req, client)
+		return
+	}
+	if req.Kind == "gitlab" {
+		h.connectGitLab(w, r, req, client)
 		return
 	}
 	inst, err := promctl.DiscoverContainer(client, req.Container)
@@ -253,6 +262,136 @@ func (h *Handler) connectNginx(w http.ResponseWriter, r *http.Request, req conne
 			fmt.Fprintf(&log, "%s is inside the container only; edits there are lost when the container is recreated\n", p)
 		}
 	}
+	fmt.Fprintln(&log, "The panel never deploys or deletes this stack. Start, Stop and Down unlock once the whole stack has been healthy for 5 minutes in a row.")
+	h.recordAction(r.Context(), svc, "connect", "success", log.String(), started)
+
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, svc, nil)
+}
+
+// connectHAProxy attaches to an existing HAProxy container. Unlike the
+// panel's own generated stacks, its config is arbitrary — there's no fixed
+// /healthz to rely on — so this reads it right away and logs the health
+// probe determined from it (a monitor-uri, else its stats page, else just
+// a bound port), the same one CheckHealth uses on every future Sync.
+func (h *Handler) connectHAProxy(w http.ResponseWriter, r *http.Request, req connectRequest, client *sshexec.Client) {
+	ct, err := dockerx.Inspect(client, req.Container)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	if !haproxyctl.IsHAProxyImage(ct.Image) {
+		http.Error(w, ct.Name+" doesn't run an HAProxy image", http.StatusBadRequest)
+		return
+	}
+	project, workingDir, files := ct.Compose()
+	manifest := "# This HAProxy was not started with Docker Compose.\n"
+	if len(files) > 0 {
+		if content := promctl.ReadHostFiles(client, files); content != "" {
+			manifest = content
+		} else {
+			manifest = "# The compose file(s) could not be read: " + strings.Join(files, ", ") + "\n"
+		}
+	}
+	encrypted, err := h.secrets.Encrypt(req.Password)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = project
+	}
+	if name == "" {
+		name = ct.Name
+	}
+	svc := &Service{
+		Name: name, Type: "haproxy", Host: req.Host, Port: req.Port, Username: req.Username,
+		DeployDir: workingDir, Manifest: manifest, Status: StatusConnected, EncryptedPassword: encrypted,
+		Origin: OriginConnected, Container: ct.Name, ComposeProject: project, ComposeFiles: strings.Join(files, ","),
+	}
+	started := time.Now()
+	if err := h.services.Create(r.Context(), svc); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	svc.HasSavedPassword = true
+
+	var log strings.Builder
+	fmt.Fprintf(&log, "Connected to HAProxy container %s (%s) on %s\n", ct.Name, ct.Image, req.Host)
+	if project != "" {
+		fmt.Fprintf(&log, "Compose project: %s in %s\n", project, workingDir)
+	}
+	_, detail := haproxyctl.CheckHealth(client, ct)
+	fmt.Fprintf(&log, "Health probe: %s\n", detail)
+	fmt.Fprintln(&log, "The panel never deploys or deletes this stack. Start, Stop and Down unlock once the whole stack has been healthy for 5 minutes in a row.")
+	h.recordAction(r.Context(), svc, "connect", "success", log.String(), started)
+
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, svc, nil)
+}
+
+// connectGitLab attaches to an existing GitLab Omnibus container. Its web
+// server may listen on any port, over HTTP or HTTPS, depending on its
+// external_url, so health comes from "gitlab-ctl status" inside the
+// container rather than an HTTP probe that would have to guess.
+func (h *Handler) connectGitLab(w http.ResponseWriter, r *http.Request, req connectRequest, client *sshexec.Client) {
+	ct, err := dockerx.Inspect(client, req.Container)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	if !gitlabctl.IsGitLabImage(ct.Image) {
+		http.Error(w, ct.Name+" doesn't run a GitLab image", http.StatusBadRequest)
+		return
+	}
+	project, workingDir, files := ct.Compose()
+	manifest := "# This GitLab was not started with Docker Compose.\n"
+	if len(files) > 0 {
+		if content := promctl.ReadHostFiles(client, files); content != "" {
+			manifest = content
+		} else {
+			manifest = "# The compose file(s) could not be read: " + strings.Join(files, ", ") + "\n"
+		}
+	}
+	encrypted, err := h.secrets.Encrypt(req.Password)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = project
+	}
+	if name == "" {
+		name = ct.Name
+	}
+	svc := &Service{
+		Name: name, Type: "gitlab", Host: req.Host, Port: req.Port, Username: req.Username,
+		DeployDir: workingDir, Manifest: manifest, Status: StatusConnected, EncryptedPassword: encrypted,
+		Origin: OriginConnected, Container: ct.Name, ComposeProject: project, ComposeFiles: strings.Join(files, ","),
+	}
+	started := time.Now()
+	if err := h.services.Create(r.Context(), svc); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	svc.HasSavedPassword = true
+
+	var log strings.Builder
+	fmt.Fprintf(&log, "Connected to GitLab container %s (%s) on %s\n", ct.Name, ct.Image, req.Host)
+	if project != "" {
+		fmt.Fprintf(&log, "Compose project: %s in %s\n", project, workingDir)
+	}
+	for _, m := range []struct{ label, dir string }{{"Config", "/etc/gitlab"}, {"Data", "/var/opt/gitlab"}} {
+		if host, ok := ct.HostPath(m.dir); ok {
+			fmt.Fprintf(&log, "%s: %s on the server\n", m.label, host)
+		} else {
+			fmt.Fprintf(&log, "%s: %s is not mounted from the server (a Docker volume, or inside the container only)\n", m.label, m.dir)
+		}
+	}
+	_, detail := gitlabctl.CheckHealth(client, ct.Name)
+	fmt.Fprintf(&log, "Health: %s\n", detail)
 	fmt.Fprintln(&log, "The panel never deploys or deletes this stack. Start, Stop and Down unlock once the whole stack has been healthy for 5 minutes in a row.")
 	h.recordAction(r.Context(), svc, "connect", "success", log.String(), started)
 

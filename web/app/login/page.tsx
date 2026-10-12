@@ -1,5 +1,9 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 "use client";
 
+import { AuthorCredit } from "@/components/AuthorCredit";
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -32,7 +36,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-dvh items-center justify-center px-4 py-10">
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-6 px-4 py-10">
       <form onSubmit={handleSubmit} className="card flex w-full max-w-sm flex-col gap-5 p-7 sm:p-8">
         <div className="flex flex-col gap-4">
           <span className="grid h-11 w-11 place-items-center rounded-2xl bg-accent text-on-accent shadow-card" aria-hidden>
@@ -73,6 +77,7 @@ export default function LoginPage() {
           {pending ? "Signing in…" : "Sign in"}
         </Button>
       </form>
+      <AuthorCredit className="text-center" />
     </div>
   );
 }

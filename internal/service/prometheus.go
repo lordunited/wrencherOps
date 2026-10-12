@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package service
 
 import (
@@ -22,7 +25,7 @@ import (
 // apply it (validated, backed up, hot-reloaded), and move an inline config
 // onto the server's disk so edits survive redeploys.
 
-func (h *Handler) registerPrometheusRoutes(mux *http.ServeMux) {
+func (h *Handler) registerPrometheusRoutes(mux routeMux) {
 	mux.HandleFunc("POST /api/services/{id}/prometheus/inspect", h.handlePromInspect)
 	mux.HandleFunc("POST /api/services/{id}/prometheus/preview", h.handlePromPreview)
 	mux.HandleFunc("POST /api/services/{id}/prometheus/apply", h.handlePromApply)
@@ -400,7 +403,7 @@ func (h *Handler) handlePromMoveToDisk(w http.ResponseWriter, r *http.Request) {
 	folder := strings.TrimRight(svc.DeployDir, "/") + "/" + promctl.ConfigFolder
 	file := folder + "/prometheus.yml"
 	backup := promctl.BackupPath(file, time.Now().UTC().Format("20060102-150405"))
-	cmd := `if [ "$(id -u)" -eq 0 ]; then AS_ROOT=""; else AS_ROOT="sudo -n"; fi; set -e; ` +
+	cmd := sshexec.AsRootPrelude + `set -e; ` +
 		fmt.Sprintf(`$AS_ROOT mkdir -p %s %s; `, sshexec.ShellQuote(folder), sshexec.ShellQuote(folder+"/rules")) +
 		fmt.Sprintf(`[ ! -f %s ] || { $AS_ROOT mkdir -p "$(dirname %s)" && $AS_ROOT cp -p %s %s; }; `,
 			sshexec.ShellQuote(file), sshexec.ShellQuote(backup), sshexec.ShellQuote(file), sshexec.ShellQuote(backup)) +

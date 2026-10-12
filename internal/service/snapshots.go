@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package service
 
 import (
@@ -68,8 +71,8 @@ type snapshotResponse struct {
 // or 404 when there is none yet. It never touches the server.
 func (h *Handler) handlePromSnapshot(w http.ResponseWriter, r *http.Request) {
 	kind := r.URL.Query().Get("kind")
-	if kind != snapshotInspect && kind != snapshotStatus && kind != snapshotNginx {
-		http.Error(w, "kind must be inspect, status or nginx", http.StatusBadRequest)
+	if kind != snapshotInspect && kind != snapshotStatus && kind != snapshotNginx && kind != snapshotHAProxy && kind != snapshotEnvoy {
+		http.Error(w, "kind must be inspect, status, nginx, haproxy or envoy", http.StatusBadRequest)
 		return
 	}
 	data, at, ok := h.snapshots.Get(r.Context(), r.PathValue("id"), kind)

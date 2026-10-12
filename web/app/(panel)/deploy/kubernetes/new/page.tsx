@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 import { NewRawServiceForm } from "@/components/NewRawServiceForm";
 
 const PLACEHOLDER = `apiVersion: apps/v1

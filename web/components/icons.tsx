@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 import type { NavIcon } from "@/lib/nav";
 
 const COMMON = {
@@ -9,7 +12,7 @@ const COMMON = {
   strokeLinejoin: "round" as const,
 };
 
-export type IconName = NavIcon | "home" | "pulse" | "folder" | "menu" | "close" | "logout";
+export type IconName = NavIcon | "home" | "pulse" | "folder" | "menu" | "close" | "logout" | "bell" | "stack" | "search";
 
 // Generic glyphs, not brand marks: a branch icon stands in for "GitLab" as
 // a category (source control), not the GitLab logo itself.
@@ -28,6 +31,53 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <rect x="4" y="14" width="16" height="6" rx="1.5" />
       <path d="M8 14V9a4 4 0 0 1 8 0v5" />
       <path d="M12 3v3" />
+    </>
+  ),
+  server: (
+    <>
+      <rect x="4" y="4" width="16" height="7" rx="1.5" />
+      <rect x="4" y="13" width="16" height="7" rx="1.5" />
+      <path d="M8 7.5h.01" />
+      <path d="M8 16.5h.01" />
+    </>
+  ),
+  terraform: (
+    <>
+      <path d="M4 4.5l6 3.5v7l-6-3.5z" />
+      <path d="M11.5 8l6-3.5v7l-6 3.5z" />
+      <path d="M11.5 16.5l6-3.5v7l-6-3.5z" />
+    </>
+  ),
+  ansible: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M10 8.5v7l5.5-3.5z" />
+    </>
+  ),
+  admin: (
+    <>
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M3 19.5c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5" />
+      <path d="M17.5 8.5l1.5 1.5 3-3" />
+    </>
+  ),
+  stack: (
+    <>
+      <path d="M12 3l9 5-9 5-9-5z" />
+      <path d="M3 13l9 5 9-5" />
+      <path d="M3 17.5l9 5 9-5" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M16 16l4.5 4.5" />
+    </>
+  ),
+  bell: (
+    <>
+      <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" />
+      <path d="M10 20a2 2 0 0 0 4 0" />
     </>
   ),
   home: (

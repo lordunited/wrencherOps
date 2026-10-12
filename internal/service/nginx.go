@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package service
 
 import (
@@ -19,7 +22,7 @@ import (
 
 const snapshotNginx = "nginx"
 
-func (h *Handler) registerNginxRoutes(mux *http.ServeMux) {
+func (h *Handler) registerNginxRoutes(mux routeMux) {
 	mux.HandleFunc("POST /api/services/{id}/nginx/inspect", h.handleNginxInspect)
 	mux.HandleFunc("POST /api/services/{id}/nginx/preview", h.handleNginxPreview)
 	mux.HandleFunc("POST /api/services/{id}/nginx/apply", h.handleNginxApply)

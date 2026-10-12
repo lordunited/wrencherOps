@@ -1,6 +1,10 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -8,23 +12,28 @@ import (
 
 const CookieName = "session"
 
+// Verifier checks a username and password: the built-in accounts and the
+// panel's own users (access.Resolver is one).
+type Verifier interface {
+	Verify(ctx context.Context, username, password string) bool
+}
+
 type Handler struct {
-	users    Users
+	verifier Verifier
 	sessions *SessionStore
 	secure   bool
 }
 
-func NewHandler(users Users, sessions *SessionStore, secureCookies bool) *Handler {
-	return &Handler{users: users, sessions: sessions, secure: secureCookies}
+func NewHandler(verifier Verifier, sessions *SessionStore, secureCookies bool) *Handler {
+	return &Handler{verifier: verifier, sessions: sessions, secure: secureCookies}
 }
 
-// RegisterRoutes wires the login/logout/me endpoints. These are
-// intentionally left unauthenticated on the mux; login and logout couldn't
-// work otherwise, and me is how a caller finds out it isn't authenticated.
+// RegisterRoutes wires the login/logout endpoints. These are intentionally
+// left unauthenticated on the mux; they couldn't work otherwise. Who is
+// signed in (GET /api/auth/me) is served behind the access guard.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/auth/login", h.handleLogin)
 	mux.HandleFunc("POST /api/auth/logout", h.handleLogout)
-	mux.HandleFunc("GET /api/auth/me", h.handleMe)
 }
 
 type loginRequest struct {
@@ -39,7 +48,7 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.users.Verify(req.Username, req.Password) {
+	if !h.verifier.Verify(r.Context(), req.Username, req.Password) {
 		http.Error(w, "invalid username or password", http.StatusUnauthorized)
 		return
 	}
@@ -79,33 +88,4 @@ func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 	})
 	w.WriteHeader(http.StatusOK)
-}
-
-func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
-	username, ok := h.sessionUsername(r)
-	if !ok {
-		http.Error(w, "not authenticated", http.StatusUnauthorized)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"username": username})
-}
-
-func (h *Handler) sessionUsername(r *http.Request) (string, bool) {
-	cookie, err := r.Cookie(CookieName)
-	if err != nil {
-		return "", false
-	}
-	return h.sessions.Validate(r.Context(), cookie.Value)
-}
-
-// RequireAuth wraps a handler so it 401s unless a valid session cookie is present.
-func (h *Handler) RequireAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := h.sessionUsername(r); !ok {
-			http.Error(w, "not authenticated", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }

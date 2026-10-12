@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package deploy
 
 import (
@@ -74,6 +77,15 @@ func (w *logWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// jobRetention is how long a finished job's log stays fetchable before the
+// Store forgets it. Without this, Store.jobs grows by one entry — plus
+// whatever output it collected — on every single Deploy/Start/Stop/Down,
+// forever, for as long as the process runs. A completed job's log is
+// already understood to be best-effort (it doesn't survive a restart
+// either), so this doesn't change what callers can rely on, just how long
+// a finished job stays around.
+const jobRetention = time.Hour
+
 // Store holds in-flight and completed jobs in memory. Like the rest of this
 // backend, it doesn't survive a restart — acceptable for a single-instance
 // tool with no database.
@@ -90,8 +102,25 @@ func (s *Store) create() *Job {
 	job := &Job{id: randomID(), status: StatusRunning, log: []string{}, startedAt: time.Now(), updatedAt: time.Now()}
 	s.mu.Lock()
 	s.jobs[job.id] = job
+	s.sweep()
 	s.mu.Unlock()
 	return job
+}
+
+// sweep evicts finished jobs last updated more than jobRetention ago.
+// Called with mu already held; runs on every create() rather than on its
+// own ticker, since that's already exactly as often as this needs to run
+// and doesn't need a second background goroutine to do it.
+func (s *Store) sweep() {
+	cutoff := time.Now().Add(-jobRetention)
+	for id, j := range s.jobs {
+		j.mu.Lock()
+		stale := j.status != StatusRunning && j.updatedAt.Before(cutoff)
+		j.mu.Unlock()
+		if stale {
+			delete(s.jobs, id)
+		}
+	}
 }
 
 func (s *Store) Get(id string) (*Job, bool) {
@@ -124,6 +153,12 @@ type applySpec struct {
 	// dataDirs are created and handed to their container's user before
 	// applyCmd runs (see DataDirsFor).
 	dataDirs []DataDir
+
+	// files are the project's own files (.env, configs, ...), written into
+	// the deploy folder before applyCmd runs, always overwriting; see
+	// writeProjectFiles.
+	files      []ProjectFile
+	trackFiles bool
 
 	// seeds are written before applyCmd runs, only where missing.
 	seeds []SeedFile
@@ -187,6 +222,9 @@ func (s *Store) run(target sshexec.Target, content, deployDir string, spec apply
 			return
 		}
 		job.appendLog("File written.\n")
+		if spec.trackFiles && !writeProjectFiles(job, client, out, deployDir, spec.files) {
+			return
+		}
 
 		if !checkAvailable(job, client, out, spec.checkCmd, spec.checkDesc, spec.installHint) {
 			return
@@ -276,13 +314,36 @@ func (s *Store) RunCompose(target sshexec.Target, composeYAML, deployDir string,
 		dataDirs:    dataDirs,
 		seeds:       seeds,
 		filename:    "docker-compose.yml",
-		checkCmd:    "docker compose version",
+		checkCmd:    sshexec.AsRoot("docker compose version"),
 		checkDesc:   "Docker Compose is available",
 		installHint: "Install Docker with the Compose plugin: https://docs.docker.com/compose/install/",
 		verb:        "Starting services (docker compose up -d)... this can pull multi-GB images on first run and take several minutes",
 		doneMsg:     "Containers started.",
 		applyCmd: func(deployDir, _ string) string {
-			return fmt.Sprintf("cd %s && docker compose up -d", sshexec.ShellQuote(deployDir))
+			return sshexec.AsRootPrelude + sshexec.ComposeIn(deployDir) + " up -d"
+		},
+	})
+}
+
+// RunComposeProject deploys a custom compose project: its compose file plus
+// every file of the project (.env, configs, scripts, ...) into deployDir,
+// then "docker compose up -d --remove-orphans", so a service deleted from
+// the compose has its container removed too (its volumes stay).
+func (s *Store) RunComposeProject(target sshexec.Target, composeYAML, deployDir, composeFile string, files []ProjectFile) *Job {
+	if composeFile == "" {
+		composeFile = "docker-compose.yml"
+	}
+	return s.run(target, composeYAML, deployDir, applySpec{
+		files:       files,
+		trackFiles:  true,
+		filename:    composeFile,
+		checkCmd:    sshexec.AsRoot("docker compose version"),
+		checkDesc:   "Docker Compose is available",
+		installHint: "Install Docker with the Compose plugin: https://docs.docker.com/compose/install/",
+		verb:        "Starting services (docker compose up -d --remove-orphans)... this can pull images on first run and take a while",
+		doneMsg:     "Containers started.",
+		applyCmd: func(deployDir, _ string) string {
+			return sshexec.AsRootPrelude + sshexec.ComposeIn(deployDir) + " up -d --remove-orphans"
 		},
 	})
 }
@@ -298,12 +359,14 @@ type Project struct {
 }
 
 // Command is the "docker compose" invocation for the project, ready for a
-// subcommand to be appended.
+// subcommand to be appended. Callers must prepend sshexec.AsRootPrelude —
+// this only inserts the "$AS_ROOT" it defines, right before "docker" so
+// "cd"/other shell logic around it never runs through sudo.
 func (p Project) Command() string {
 	if p.Name == "" && len(p.Files) == 0 {
-		return fmt.Sprintf("cd %s && docker compose", sshexec.ShellQuote(p.Dir))
+		return sshexec.ComposeIn(p.Dir)
 	}
-	cmd := "docker compose"
+	cmd := "$AS_ROOT docker compose"
 	if p.Name != "" {
 		cmd += " -p " + sshexec.ShellQuote(p.Name)
 	}
@@ -325,12 +388,12 @@ func (p Project) Command() string {
 func (s *Store) RunComposeStart(target sshexec.Target, project Project, dataDirs []DataDir) *Job {
 	return s.runCommand(target, commandSpec{
 		dataDirs:    dataDirs,
-		checkCmd:    "docker compose version",
+		checkCmd:    sshexec.AsRoot("docker compose version"),
 		checkDesc:   "Docker Compose is available",
 		installHint: "Install Docker with the Compose plugin: https://docs.docker.com/compose/install/",
 		verb:        "Starting services (docker compose up -d)",
 		doneMsg:     "Containers started.",
-		cmd:         project.Command() + " up -d",
+		cmd:         sshexec.AsRootPrelude + project.Command() + " up -d",
 	})
 }
 
@@ -340,12 +403,12 @@ func (s *Store) RunComposeStart(target sshexec.Target, project Project, dataDirs
 // "docker compose start" picks up right where it left off.
 func (s *Store) RunComposeStop(target sshexec.Target, project Project) *Job {
 	return s.runCommand(target, commandSpec{
-		checkCmd:    "docker compose version",
+		checkCmd:    sshexec.AsRoot("docker compose version"),
 		checkDesc:   "Docker Compose is available",
 		installHint: "Install Docker with the Compose plugin: https://docs.docker.com/compose/install/",
 		verb:        "Stopping services (docker compose stop)",
 		doneMsg:     "Containers stopped.",
-		cmd:         project.Command() + " stop",
+		cmd:         sshexec.AsRootPrelude + project.Command() + " stop",
 	})
 }
 
@@ -354,12 +417,12 @@ func (s *Store) RunComposeStop(target sshexec.Target, project Project) *Job {
 // left alone (this never passes -v), so persisted data survives.
 func (s *Store) RunComposeDown(target sshexec.Target, project Project) *Job {
 	return s.runCommand(target, commandSpec{
-		checkCmd:    "docker compose version",
+		checkCmd:    sshexec.AsRoot("docker compose version"),
 		checkDesc:   "Docker Compose is available",
 		installHint: "Install Docker with the Compose plugin: https://docs.docker.com/compose/install/",
 		verb:        "Removing containers (docker compose down)",
 		doneMsg:     "Containers removed.",
-		cmd:         project.Command() + " down",
+		cmd:         sshexec.AsRootPrelude + project.Command() + " down",
 	})
 }
 
@@ -370,22 +433,25 @@ func (s *Store) RunComposeDown(target sshexec.Target, project Project) *Job {
 // confirm before calling it. "docker compose down -v" against a project
 // that's already stopped/removed is a safe no-op (verified), so this is
 // also safe to call on a service that was never fully deployed.
-func (s *Store) RunComposeDestroy(target sshexec.Target, deployDir string) *Job {
-	quoted := sshexec.ShellQuote(deployDir)
+func (s *Store) RunComposeDestroy(target sshexec.Target, composeDir, deployDir string) *Job {
 	return s.runCommand(target, commandSpec{
-		checkCmd:    "docker compose version",
+		checkCmd:    sshexec.AsRoot("docker compose version"),
 		checkDesc:   "Docker Compose is available",
 		installHint: "Install Docker with the Compose plugin: https://docs.docker.com/compose/install/",
 		verb:        fmt.Sprintf("Removing containers, volumes, and %s", deployDir),
 		doneMsg:     fmt.Sprintf("Containers, volumes, and %s removed.", deployDir),
-		cmd:         fmt.Sprintf("cd %s && docker compose down -v && cd / && rm -rf %s", quoted, quoted),
+		cmd:         sshexec.AsRootPrelude + sshexec.ComposeIn(composeDir) + " down -v && $AS_ROOT rm -rf " + sshexec.ShellQuote(deployDir),
 	})
 }
 
 // RunKubernetesApply writes manifestYAML to deployDir and applies it with
 // kubectl, using whatever cluster access is already configured for the SSH
 // user on the target (its default kubeconfig) — this tool doesn't manage
-// kubeconfigs itself.
+// kubeconfigs itself. Deliberately not run via sudo, unlike the Docker
+// commands elsewhere in this file: kubectl's access comes from the
+// connecting user's own kubeconfig (usually ~/.kube/config), and sudo
+// would switch to root's, most likely breaking cluster access rather than
+// fixing a permissions problem.
 func (s *Store) RunKubernetesApply(target sshexec.Target, manifestYAML, deployDir string) *Job {
 	return s.run(target, manifestYAML, deployDir, applySpec{
 		filename:    "manifest.yaml",

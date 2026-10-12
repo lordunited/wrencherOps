@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 // A figure in a card. "hero" fills it with the accent color, for the one
 // number on a page that matters most.
 export function StatTile({

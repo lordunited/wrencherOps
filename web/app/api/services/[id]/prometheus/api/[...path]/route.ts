@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 import type { NextRequest } from "next/server";
 import { proxyToBackend } from "@/lib/backend";
 

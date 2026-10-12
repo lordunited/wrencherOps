@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 // Package deploy generates configuration for and runs remote installs of
 // devops-wrapper's supported services, starting with GitLab on Docker.
 package deploy

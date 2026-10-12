@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package nginxctl
 
 import (
@@ -157,6 +160,184 @@ func TestRenderedConfigsParse(t *testing.T) {
 	}
 }
 
+func TestRenderSecurityHeaders(t *testing.T) {
+	sp := ServerSpec{
+		Names: []string{"app.example.com"}, Kind: "proxy", Upstream: "http://app:3000",
+		CertPath: "/etc/nginx/certs/app.crt", KeyPath: "/etc/nginx/certs/app.key", ForceHTTPS: true,
+		HSTS: true, XFrameOptions: "SAMEORIGIN", NoSniff: true, ReferrerPolicy: "strict-origin-when-cross-origin",
+		ContentSecurityPolicy: "default-src 'self'", PermissionsPolicy: "geolocation=(), camera=()",
+		CORS: true, CORSOrigin: "https://app.example.com", CORSCredentials: true,
+	}
+	if err := sp.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	out := sp.Render()
+	ov := Build(map[string]string{"/etc/nginx/conf.d/x.conf": out}, "/etc/nginx/nginx.conf")
+	if len(ov.ParseErrors) > 0 {
+		t.Fatalf("rendered config doesn't parse: %v\n%s", ov.ParseErrors, out)
+	}
+
+	// The point of detection: what Render() writes must come back out of
+	// Build() too, the same way it would for a server block someone wrote
+	// by hand — not just parse without error.
+	if len(ov.Servers) != 2 {
+		t.Fatalf("expected 2 servers (HTTP redirect + HTTPS), got %d", len(ov.Servers))
+	}
+	httpSrv, httpsSrv := ov.Servers[0], ov.Servers[1]
+	if len(httpSrv.Headers) != 0 {
+		t.Errorf("plain-HTTP server should have no detected headers, got %+v", httpSrv.Headers)
+	}
+	// Non-CORS headers apply to the whole server, so they're declared (and
+	// so detected) at server level.
+	want := map[string]string{
+		"Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+		"X-Frame-Options":           "SAMEORIGIN",
+		"X-Content-Type-Options":    "nosniff",
+		"Referrer-Policy":           "strict-origin-when-cross-origin",
+		"Content-Security-Policy":   "default-src 'self'",
+		"Permissions-Policy":        "geolocation=(), camera=()",
+	}
+	got := map[string]string{}
+	for _, h := range httpsSrv.Headers {
+		got[h.Name] = h.Value
+		if !h.Always {
+			t.Errorf("detected header %s should have Always=true", h.Name)
+		}
+	}
+	for name, value := range want {
+		if got[name] != value {
+			t.Errorf("detected server-level header %s = %q, want %q (all detected: %+v)", name, got[name], value, httpsSrv.Headers)
+		}
+	}
+	// CORS headers only make sense per-request-path, so they're declared
+	// (and so detected) on the location, not the server.
+	if len(httpsSrv.Locations) != 1 {
+		t.Fatalf("expected 1 location, got %+v", httpsSrv.Locations)
+	}
+	locHeaders := map[string]string{}
+	for _, h := range httpsSrv.Locations[0].Headers {
+		locHeaders[h.Name] = h.Value
+	}
+	if locHeaders["Access-Control-Allow-Origin"] != "https://app.example.com" {
+		t.Errorf("detected location header Access-Control-Allow-Origin = %q, want the configured origin (all: %+v)",
+			locHeaders["Access-Control-Allow-Origin"], httpsSrv.Locations[0].Headers)
+	}
+	if locHeaders["Access-Control-Allow-Credentials"] != "true" {
+		t.Errorf("detected location header Access-Control-Allow-Credentials = %q, want \"true\" (all: %+v)",
+			locHeaders["Access-Control-Allow-Credentials"], httpsSrv.Locations[0].Headers)
+	}
+
+	httpBlock, httpsBlock, ok := strings.Cut(out, "listen 443")
+	if !ok {
+		t.Fatalf("expected an HTTPS server block:\n%s", out)
+	}
+	if strings.Contains(httpBlock, "Strict-Transport-Security") {
+		t.Errorf("HSTS must not appear on the plain-HTTP (redirect-only) block:\n%s", httpBlock)
+	}
+	for _, want := range []string{
+		`Strict-Transport-Security "max-age=63072000; includeSubDomains" always;`,
+		"X-Frame-Options SAMEORIGIN always;",
+		"X-Content-Type-Options nosniff always;",
+		"Referrer-Policy strict-origin-when-cross-origin always;",
+		`Content-Security-Policy "default-src 'self'" always;`,
+		`Permissions-Policy "geolocation=(), camera=()" always;`,
+		`Access-Control-Allow-Origin "https://app.example.com" always;`,
+		`Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS" always;`,
+		`Access-Control-Allow-Credentials "true" always;`,
+		"if ($request_method = OPTIONS) {",
+		"return 204;",
+	} {
+		if !strings.Contains(httpsBlock, want) {
+			t.Errorf("missing %q in HTTPS block:\n%s", want, httpsBlock)
+		}
+	}
+
+	// The regression this guards against: nginx's "if" does not inherit
+	// add_header from a PARENT server/location — verified against a real
+	// nginx container, where CORS headers declared at server level simply
+	// never reached a "return" inside a nested "if". Declaring them in the
+	// *same* location block as the "if" (rather than the parent server
+	// block, and rather than duplicating them inside the "if" itself) does
+	// work — also verified against a real container — so that's the
+	// layout to protect: the CORS lines must come before the "if", in the
+	// same location.
+	corsIdx := strings.Index(httpsBlock, `Access-Control-Allow-Origin "https://app.example.com" always;`)
+	locationIdx := strings.Index(httpsBlock, "location / {")
+	ifIdx := strings.Index(httpsBlock, "if ($request_method")
+	if corsIdx < 0 || locationIdx < 0 || ifIdx < 0 || !(locationIdx < corsIdx && corsIdx < ifIdx) {
+		t.Errorf("Access-Control-Allow-Origin must be declared inside \"location /\", before the OPTIONS \"if\":\n%s", httpsBlock)
+	}
+}
+
+func TestMultiOriginCORSMap(t *testing.T) {
+	sp := ServerSpec{
+		Names: []string{"api.example.com"}, Kind: "proxy", Upstream: "http://app:3000",
+		CORS: true, CORSOrigin: "https://app.example.com, https://staging.example.com", CORSCredentials: true,
+	}
+	if err := sp.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	out := sp.Render()
+	ov := Build(map[string]string{"/etc/nginx/conf.d/x.conf": out}, "/etc/nginx/nginx.conf")
+	if len(ov.ParseErrors) > 0 {
+		t.Fatalf("rendered config doesn't parse: %v\n%s", ov.ParseErrors, out)
+	}
+
+	if !strings.Contains(out, "map $http_origin $cors_origin_api_example_com {") {
+		t.Errorf("expected a map block for the multi-origin case:\n%s", out)
+	}
+	if !strings.Contains(out, `default "";`) {
+		t.Errorf("map must default to empty (deny) for an unlisted origin:\n%s", out)
+	}
+	if !strings.Contains(out, "https://app.example.com $http_origin;") || !strings.Contains(out, "https://staging.example.com $http_origin;") {
+		t.Errorf("map must list both configured origins:\n%s", out)
+	}
+	if !strings.Contains(out, `Access-Control-Allow-Origin "$cors_origin_api_example_com" always;`) {
+		t.Errorf("Access-Control-Allow-Origin must reference the mapped variable:\n%s", out)
+	}
+	if !strings.Contains(out, "add_header Vary Origin always;") {
+		t.Errorf("a dynamic origin needs Vary: Origin so caches don't mix up clients:\n%s", out)
+	}
+	// The map must be defined before it's used.
+	if strings.Index(out, "map $http_origin") > strings.Index(out, "Access-Control-Allow-Origin") {
+		t.Errorf("map block must come before its use:\n%s", out)
+	}
+}
+
+func TestHeaderRedefinitionWarnings(t *testing.T) {
+	config := `
+server {
+    listen 80;
+    server_name app.example.com;
+
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header X-Content-Type-Options nosniff always;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    location /api/ {
+        add_header Access-Control-Allow-Origin "*" always;
+        proxy_pass http://backend;
+    }
+}
+`
+	ov := Build(map[string]string{"/etc/nginx/conf.d/app.conf": config}, "/etc/nginx/nginx.conf")
+	if len(ov.ParseErrors) > 0 {
+		t.Fatalf("config didn't parse: %v", ov.ParseErrors)
+	}
+	if len(ov.HeaderWarnings) != 1 {
+		t.Fatalf("expected exactly 1 warning (only /api/ redefines headers; / defines none of its own so it inherits cleanly), got %+v", ov.HeaderWarnings)
+	}
+	w := ov.HeaderWarnings[0]
+	for _, want := range []string{"/api/", "X-Content-Type-Options", "X-Frame-Options"} {
+		if !strings.Contains(w, want) {
+			t.Errorf("warning missing %q: %s", want, w)
+		}
+	}
+}
+
 func TestValidateRejects(t *testing.T) {
 	bad := []ServerSpec{
 		{Kind: "proxy", Upstream: "http://a:1"},                                  // no names
@@ -168,6 +349,11 @@ func TestValidateRejects(t *testing.T) {
 		{Names: []string{"a.com"}, Kind: "proxy", Upstream: "http://a:1", CertPath: "/c.crt"}, // key missing
 		{Names: []string{"a.com"}, Kind: "proxy", Upstream: "http://a:1", MaxBodySize: "lots"},
 		{Names: []string{"a.com"}, Kind: "teleport"},
+		{Names: []string{"a.com"}, Kind: "proxy", Upstream: "http://a:1", XFrameOptions: "NOPE"},
+		{Names: []string{"a.com"}, Kind: "proxy", Upstream: "http://a:1", ReferrerPolicy: "whenever-i-feel-like-it"},
+		{Names: []string{"a.com"}, Kind: "proxy", Upstream: "http://a:1", ContentSecurityPolicy: `default-src "self"`}, // embedded quote
+		{Names: []string{"a.com"}, Kind: "proxy", Upstream: "http://a:1", CORS: true, CORSOrigin: "not a url"},
+		{Names: []string{"a.com"}, Kind: "proxy", Upstream: "http://a:1", CORS: true, CORSCredentials: true}, // wildcard origin + credentials
 	}
 	for _, sp := range bad {
 		if err := sp.Validate(); err == nil {

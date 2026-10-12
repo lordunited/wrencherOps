@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 // Package dockerx has helpers for working with a Docker container on a
 // remote server over SSH: inspecting it, mapping its paths to the server's,
 // reading its files, and writing files with a backup.
@@ -34,7 +37,7 @@ type Mount struct {
 
 // Inspect reads a container's details.
 func Inspect(c *sshexec.Client, name string) (*Container, error) {
-	out, errOut, err := c.Output("docker inspect --format '{{json .}}' " + sshexec.ShellQuote(name))
+	out, errOut, err := c.Output(sshexec.AsRoot("docker inspect --format '{{json .}}' " + sshexec.ShellQuote(name)))
 	if err != nil {
 		return nil, fmt.Errorf("container %s not found on the server: %v %s", name, err, strings.TrimSpace(errOut))
 	}
@@ -127,9 +130,9 @@ func ImageBase(image string) string {
 
 // FindByImage lists containers (running or not) whose image matches.
 func FindByImage(c *sshexec.Client, match func(image string) bool) ([]*Container, error) {
-	out, errOut, err := c.Output("docker ps -a --format '{{.Names}}\t{{.Image}}'")
+	out, errOut, err := c.Output(sshexec.AsRoot("docker ps -a --format '{{.Names}}\t{{.Image}}'"))
 	if err != nil {
-		return nil, fmt.Errorf("listing containers failed (the SSH user needs access to Docker): %v %s", err, strings.TrimSpace(errOut))
+		return nil, fmt.Errorf("listing containers failed (the SSH user needs access to Docker, directly or via sudo): %v %s", err, strings.TrimSpace(errOut))
 	}
 	var found []*Container
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
@@ -159,7 +162,9 @@ func SHA(content string) string {
 }
 
 // Exec builds a "docker exec" running script with sh and the given
-// arguments ($1, $2, ...), all safely quoted. root runs it as uid 0.
+// arguments ($1, $2, ...), all safely quoted. root runs it as uid 0
+// *inside the container* — separate from, and in addition to, the sudo
+// this wraps the whole command in for reaching the Docker socket itself.
 func Exec(container string, root bool, script string, args ...string) string {
 	cmd := "docker exec "
 	if root {
@@ -169,7 +174,7 @@ func Exec(container string, root bool, script string, args ...string) string {
 	for _, a := range args {
 		cmd += " " + sshexec.ShellQuote(a)
 	}
-	return cmd
+	return sshexec.AsRoot(cmd)
 }
 
 // ReadFiles reads the given files (globs allowed) from inside the
@@ -212,8 +217,6 @@ func BackupPath(p, stamp string) string {
 	return BackupRoot + path.Clean("/"+p) + "." + stamp
 }
 
-const asRoot = `if [ "$(id -u)" -eq 0 ]; then AS_ROOT=""; else AS_ROOT="sudo -n"; fi; `
-
 // WriteFile backs up and replaces one file. A file on a bind mount is
 // written on the server, in place, so a single-file mount (which pins its
 // inode) sees the change. Otherwise it's written inside the container.
@@ -222,7 +225,7 @@ func WriteFile(c *sshexec.Client, ct *Container, p, content, stamp string) (stri
 	b64 := base64.StdEncoding.EncodeToString([]byte(content))
 	if host, ok := ct.HostPath(p); ok {
 		backup := BackupPath(host, stamp)
-		cmd := asRoot + fmt.Sprintf(
+		cmd := sshexec.AsRootPrelude + fmt.Sprintf(
 			`F=%s; B=%s; $AS_ROOT mkdir -p "$(dirname "$F")" && { [ ! -f "$F" ] || { $AS_ROOT mkdir -p "$(dirname "$B")" && $AS_ROOT cp -p "$F" "$B"; }; } && echo %s | base64 -d | $AS_ROOT tee "$F" > /dev/null`,
 			sshexec.ShellQuote(host), sshexec.ShellQuote(backup), b64)
 		if _, stderr, err := c.Output(cmd); err != nil {
@@ -242,7 +245,7 @@ func WriteFile(c *sshexec.Client, ct *Container, p, content, stamp string) (stri
 // file if it was newly created.
 func RestoreFile(c *sshexec.Client, ct *Container, p, stamp string) error {
 	if host, ok := ct.HostPath(p); ok {
-		cmd := asRoot + fmt.Sprintf(`F=%s; B=%s; if [ -f "$B" ]; then $AS_ROOT cat "$B" | $AS_ROOT tee "$F" > /dev/null; else $AS_ROOT rm -f "$F"; fi`,
+		cmd := sshexec.AsRootPrelude + fmt.Sprintf(`F=%s; B=%s; if [ -f "$B" ]; then $AS_ROOT cat "$B" | $AS_ROOT tee "$F" > /dev/null; else $AS_ROOT rm -f "$F"; fi`,
 			sshexec.ShellQuote(host), sshexec.ShellQuote(BackupPath(host, stamp)))
 		_, _, err := c.Output(cmd)
 		return err
@@ -250,4 +253,52 @@ func RestoreFile(c *sshexec.Client, ct *Container, p, stamp string) error {
 	script := `F="$1"; B="$2"; if [ -f "$B" ]; then cat "$B" > "$F"; else rm -f "$F"; fi`
 	_, _, err := c.Output(Exec(ct.Name, true, script, p, BackupPath(p, stamp)))
 	return err
+}
+
+// ContainerStats is one container's resource use right now, as "docker
+// stats" reports it.
+type ContainerStats struct {
+	Name    string `json:"name"`
+	CPU     string `json:"cpu"`
+	Memory  string `json:"memory"` // e.g. "128MiB / 512MiB"
+	MemPerc string `json:"memPercent"`
+	NetIO   string `json:"netIO"`
+	PIDs    string `json:"pids"`
+}
+
+// Stats runs "docker stats" once for every named container and returns
+// each one's current reading, in whatever order the daemon returns them.
+//
+// names must already be known to be running: unlike most docker
+// subcommands, if even one name in the list doesn't exist right now (it
+// was removed a moment ago, say), the whole command fails and nothing is
+// returned for any of them — verified against a real daemon. A stopped
+// (but still-existing) container doesn't fail the command, but prints a
+// meaningless all-zero line instead of erroring, which is exactly why
+// callers should only pass container names that were just observed
+// running, not merely present.
+func Stats(c *sshexec.Client, names []string) []ContainerStats {
+	if len(names) == 0 {
+		return nil
+	}
+	cmd := "docker stats --no-stream --format '{{json .}}'"
+	for _, n := range names {
+		cmd += " " + sshexec.ShellQuote(n)
+	}
+	out, _, _ := c.Output(sshexec.AsRoot(cmd))
+	var stats []ContainerStats
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var raw struct{ Name, CPUPerc, MemUsage, MemPerc, NetIO, PIDs string }
+		if json.Unmarshal([]byte(line), &raw) != nil {
+			continue
+		}
+		stats = append(stats, ContainerStats{
+			Name: raw.Name, CPU: raw.CPUPerc, Memory: raw.MemUsage, MemPerc: raw.MemPerc, NetIO: raw.NetIO, PIDs: raw.PIDs,
+		})
+	}
+	return stats
 }

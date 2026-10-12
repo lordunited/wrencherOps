@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package deploy
 
 import (
@@ -58,6 +61,12 @@ func SeedFilesFor(serviceType, deployDir string) []SeedFile {
 	if serviceType == "nginx" {
 		return NginxSeedFiles(deployDir)
 	}
+	if serviceType == "haproxy" {
+		return HAProxySeedFiles(deployDir)
+	}
+	if serviceType == "envoy" {
+		return EnvoySeedFiles(deployDir)
+	}
 	if serviceType != "prometheus" {
 		return nil
 	}
@@ -77,6 +86,10 @@ func SeedsMounted(serviceType, manifest string) bool {
 		return strings.Contains(manifest, PrometheusConfigFolder+":/etc/prometheus")
 	case "nginx":
 		return strings.Contains(manifest, NginxConfFolder+":/etc/nginx/conf.d")
+	case "haproxy":
+		return strings.Contains(manifest, HAProxyConfigFolder+":/usr/local/etc/haproxy")
+	case "envoy":
+		return strings.Contains(manifest, EnvoyConfigFolder+":/etc/envoy")
 	}
 	return false
 }
@@ -88,7 +101,7 @@ func seedFiles(job *Job, client *sshexec.Client, out *logWriter, files []SeedFil
 	}
 	job.appendLog("Checking starting config files...\n")
 	var b strings.Builder
-	b.WriteString(`if [ "$(id -u)" -eq 0 ]; then AS_ROOT=""; else AS_ROOT="sudo -n"; fi; set -e`)
+	b.WriteString(sshexec.AsRootPrelude + "set -e")
 	for _, f := range files {
 		p := sshexec.ShellQuote(f.Path)
 		fmt.Fprintf(&b, `; if [ -e %s ]; then echo "  kept existing "%s; else $AS_ROOT mkdir -p "$(dirname %s)" && echo %s | base64 -d | $AS_ROOT tee %s > /dev/null && echo "  created "%s; fi`,
@@ -110,7 +123,7 @@ func seedFiles(job *Job, client *sshexec.Client, out *logWriter, files []SeedFil
 // hanging on a password prompt.
 func prepareDirsCmd(dirs []DataDir) string {
 	var b strings.Builder
-	b.WriteString(`if [ "$(id -u)" -eq 0 ]; then AS_ROOT=""; else AS_ROOT="sudo -n"; fi`)
+	b.WriteString(sshexec.AsRootPrelude + "true")
 	for _, d := range dirs {
 		p := sshexec.ShellQuote(d.Path)
 		o := sshexec.ShellQuote(d.Owner)

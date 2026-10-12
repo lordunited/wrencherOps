@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 "use client";
 
 import { useState } from "react";
@@ -7,7 +10,11 @@ import { LineDiff } from "@/components/LineDiff";
 import { YamlEditor } from "@/components/YamlEditor";
 import type { NginxReport, PromApplyResult, PromFile } from "@/lib/api";
 
-export type NginxEditorMode = { kind: "server" } | { kind: "file"; file: PromFile } | { kind: "delete"; file: PromFile };
+export type NginxEditorMode =
+  | { kind: "server" }
+  | { kind: "newfile" }
+  | { kind: "file"; file: PromFile }
+  | { kind: "delete"; file: PromFile };
 
 interface Change {
   path: string;
@@ -69,16 +76,47 @@ export function NginxChangeEditor({
   const [maxBody, setMaxBody] = useState("");
   const [timeout, setTimeout_] = useState("");
 
+  // security & CORS headers
+  const [hsts, setHsts] = useState(false);
+  const [xFrameOptions, setXFrameOptions] = useState("");
+  const [noSniff, setNoSniff] = useState(false);
+  const [xssProtection, setXssProtection] = useState(false);
+  const [referrerPolicy, setReferrerPolicy] = useState("");
+  const [csp, setCsp] = useState("");
+  const [cspReportOnly, setCspReportOnly] = useState(false);
+  const [permissionsPolicy, setPermissionsPolicy] = useState("");
+  const [cors, setCors] = useState(false);
+  const [corsOrigin, setCorsOrigin] = useState("");
+  const [corsMethods, setCorsMethods] = useState("");
+  const [corsHeaders, setCorsHeaders] = useState("");
+  const [corsCredentials, setCorsCredentials] = useState(false);
+
   // file editor
   const [fileText, setFileText] = useState(mode.kind === "file" ? mode.file.content : "");
+  const [newFileName, setNewFileName] = useState("");
 
   const title =
-    mode.kind === "server" ? "New server block" : mode.kind === "file" ? `Edit ${mode.file.path}` : `Remove ${mode.file.path}`;
+    mode.kind === "server"
+      ? "New server block"
+      : mode.kind === "newfile"
+        ? "New config file"
+        : mode.kind === "file"
+          ? `Edit ${mode.file.path}`
+          : `Remove ${mode.file.path}`;
 
   async function review() {
     if (mode.kind === "file") {
       setChanges([{ path: mode.file.path, before: mode.file.content, after: fileText, baseSha: mode.file.sha }]);
       setSummary(`Edit ${mode.file.path}`);
+      setStep("review");
+      return;
+    }
+    if (mode.kind === "newfile") {
+      const name = newFileName.trim();
+      if (!name) return;
+      const path = `${report.newFileDir}/${name}`;
+      setChanges([{ path, before: "", after: fileText, baseSha: "", isNew: true }]);
+      setSummary(`Add ${path}`);
       setStep("review");
       return;
     }
@@ -105,6 +143,19 @@ export function NginxChangeEditor({
             websocket,
             maxBodySize: maxBody.trim(),
             timeout: timeout.trim(),
+            hsts,
+            xFrameOptions,
+            noSniff,
+            xssProtection,
+            referrerPolicy,
+            contentSecurityPolicy: csp.trim(),
+            cspReportOnly,
+            permissionsPolicy: permissionsPolicy.trim(),
+            cors,
+            corsOrigin: corsOrigin.trim(),
+            corsMethods: corsMethods.trim(),
+            corsHeaders: corsHeaders.trim(),
+            corsCredentials,
           },
         }),
       });
@@ -257,6 +308,21 @@ export function NginxChangeEditor({
                   Send plain HTTP visitors to HTTPS
                 </label>
               )}
+              {certPath && (
+                <>
+                  <label className="flex items-center gap-2 text-sm text-text-primary sm:col-span-2">
+                    <input id="hsts" type="checkbox" checked={hsts} onChange={(e) => setHsts(e.target.checked)} />
+                    HSTS, with includeSubDomains (tell browsers to only ever use HTTPS for this domain and every subdomain)
+                  </label>
+                  {hsts && (
+                    <p className="text-xs text-status-warning sm:col-span-2">
+                      Every subdomain must already work over HTTPS before enabling this — a subdomain with no valid
+                      certificate becomes completely unreachable, and browsers that have seen this header won&apos;t
+                      let visitors bypass it.
+                    </p>
+                  )}
+                </>
+              )}
               {kind !== "redirect" && (
                 <label className="flex items-center gap-2 text-sm text-text-primary sm:col-span-2">
                   <input id="websocket" type="checkbox" checked={websocket} onChange={(e) => setWebsocket(e.target.checked)} />
@@ -275,6 +341,125 @@ export function NginxChangeEditor({
               )}
             </div>
           </details>
+
+          <details className="rounded-2xl bg-surface-2 px-4 py-3">
+            <summary className="cursor-pointer text-sm font-semibold text-text-primary">Security &amp; CORS headers (optional)</summary>
+            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <label className={LABEL}>
+                X-Frame-Options
+                <select id="x-frame-options" className="field" value={xFrameOptions} onChange={(e) => setXFrameOptions(e.target.value)}>
+                  <option value="">Off</option>
+                  <option value="SAMEORIGIN">SAMEORIGIN</option>
+                  <option value="DENY">DENY</option>
+                </select>
+              </label>
+              <label className={LABEL}>
+                Referrer-Policy
+                <select id="referrer-policy" className="field" value={referrerPolicy} onChange={(e) => setReferrerPolicy(e.target.value)}>
+                  <option value="">Off</option>
+                  <option value="no-referrer">no-referrer</option>
+                  <option value="strict-origin-when-cross-origin">strict-origin-when-cross-origin</option>
+                  <option value="same-origin">same-origin</option>
+                  <option value="strict-origin">strict-origin</option>
+                  <option value="origin-when-cross-origin">origin-when-cross-origin</option>
+                  <option value="no-referrer-when-downgrade">no-referrer-when-downgrade</option>
+                  <option value="unsafe-url">unsafe-url</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-sm text-text-primary sm:col-span-2">
+                <input id="no-sniff" type="checkbox" checked={noSniff} onChange={(e) => setNoSniff(e.target.checked)} />
+                X-Content-Type-Options: nosniff
+              </label>
+              <label className="flex items-center gap-2 text-sm text-text-primary sm:col-span-2">
+                <input id="xss-protection" type="checkbox" checked={xssProtection} onChange={(e) => setXssProtection(e.target.checked)} />
+                X-XSS-Protection (legacy — modern browsers ignore it in favor of CSP; still helps IE11/old browsers)
+              </label>
+              <label className={`${LABEL} sm:col-span-2`}>
+                Content-Security-Policy
+                <input
+                  id="csp"
+                  className="field font-mono"
+                  value={csp}
+                  placeholder="default-src 'self'"
+                  onChange={(e) => setCsp(e.target.value)}
+                />
+              </label>
+              {csp && (
+                <label className="flex items-center gap-2 text-sm text-text-primary sm:col-span-2">
+                  <input id="csp-report-only" type="checkbox" checked={cspReportOnly} onChange={(e) => setCspReportOnly(e.target.checked)} />
+                  Report only — logs violations to the browser console without blocking anything; use this while testing a
+                  policy, then turn it off to enforce
+                </label>
+              )}
+              <label className={`${LABEL} sm:col-span-2`}>
+                Permissions-Policy
+                <input
+                  id="permissions-policy"
+                  className="field font-mono"
+                  value={permissionsPolicy}
+                  placeholder="geolocation=(), camera=(), microphone=()"
+                  onChange={(e) => setPermissionsPolicy(e.target.value)}
+                />
+              </label>
+
+              <label className="flex items-center gap-2 text-sm text-text-primary sm:col-span-2">
+                <input id="cors" type="checkbox" checked={cors} onChange={(e) => setCors(e.target.checked)} />
+                Allow cross-origin requests (CORS)
+              </label>
+              {cors && (
+                <>
+                  <label className={`${LABEL} sm:col-span-2`}>
+                    Allowed origin(s) — leave blank for *, or list one or more (one per line, or comma-separated)
+                    <textarea
+                      id="cors-origin"
+                      className="field min-h-16 font-mono"
+                      value={corsOrigin}
+                      placeholder={"*\n\nor list specific origins to allow more than one:\nhttps://app.example.com\nhttps://staging.example.com"}
+                      onChange={(e) => setCorsOrigin(e.target.value)}
+                    />
+                  </label>
+                  {corsOrigin.trim().includes("\n") || corsOrigin.includes(",") ? (
+                    <p className="text-xs text-text-muted sm:col-span-2">
+                      With more than one origin, Nginx can only ever answer with one — this generates a{" "}
+                      <span className="font-mono">map</span> that reflects the request&apos;s Origin back only when it
+                      matches one of these, and denies (no header) otherwise. Never blindly reflects an arbitrary
+                      Origin, which would defeat CORS entirely.
+                    </p>
+                  ) : null}
+                  <label className="flex items-center gap-2 text-sm text-text-primary">
+                    <input id="cors-credentials" type="checkbox" checked={corsCredentials} onChange={(e) => setCorsCredentials(e.target.checked)} />
+                    Allow credentials (cookies, auth headers) — needs one or more specific origins above, not *
+                  </label>
+                  <label className={LABEL}>
+                    Allowed methods
+                    <input
+                      id="cors-methods"
+                      className="field font-mono"
+                      value={corsMethods}
+                      placeholder="GET, POST, PUT, PATCH, DELETE, OPTIONS"
+                      onChange={(e) => setCorsMethods(e.target.value)}
+                    />
+                  </label>
+                  <label className={LABEL}>
+                    Allowed request headers
+                    <input
+                      id="cors-headers"
+                      className="field font-mono"
+                      value={corsHeaders}
+                      placeholder="Authorization, Content-Type"
+                      onChange={(e) => setCorsHeaders(e.target.value)}
+                    />
+                  </label>
+                  {kind !== "redirect" && (
+                    <p className="text-xs text-text-muted sm:col-span-2">
+                      Preflight (OPTIONS) requests get a 204 straight from Nginx — they never reach the backend.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          </details>
+
           <p className="text-xs text-text-muted">
             It&apos;s written as its own file in <span className="font-mono">{report.newFileDir}</span>
             {!report.newFileDirOnDisk && <span className="text-status-warning"> (inside the container only; lost if the container is recreated)</span>}.
@@ -293,9 +478,33 @@ export function NginxChangeEditor({
         </>
       )}
 
+      {step === "edit" && mode.kind === "newfile" && (
+        <>
+          <label className={LABEL}>
+            File name (created in {report.newFileDir})
+            <input
+              id="new-file-name"
+              className="field font-mono"
+              value={newFileName}
+              placeholder="mmd.conf"
+              onChange={(e) => setNewFileName(e.target.value)}
+            />
+          </label>
+          <YamlEditor language="nginx" value={fileText} onChange={setFileText} />
+          <p className="text-xs text-text-muted">
+            Written as its own file in <span className="font-mono">{report.newFileDir}</span>
+            {!report.newFileDirOnDisk && (
+              <span className="text-status-warning"> (inside the container only; lost if the container is recreated)</span>
+            )}
+            . Nginx only loads it if something includes it — the default <span className="font-mono">conf.d</span> include
+            picks up any <span className="font-mono">*.conf</span> file automatically.
+          </p>
+        </>
+      )}
+
       {step === "edit" && (
         <div className="flex flex-wrap gap-2">
-          <Button onClick={review} disabled={busy}>
+          <Button onClick={review} disabled={busy || (mode.kind === "newfile" && !newFileName.trim())}>
             {busy ? "Preparing…" : "Review change"}
           </Button>
           <Button variant="secondary" onClick={onClose} disabled={busy}>

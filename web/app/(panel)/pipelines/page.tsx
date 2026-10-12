@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 import { TableCard } from "@/components/TableCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getPipelines } from "@/lib/api";

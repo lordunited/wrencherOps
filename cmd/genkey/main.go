@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 // genkey prints a random base64-encoded 32-byte key for CREDENTIAL_ENCRYPTION_KEY.
 package main
 

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 // Starting points for common alerts. They assume the exporters people
 // usually run next to Prometheus: node_exporter for hosts and the blackbox
 // exporter for websites, ports and certificates.

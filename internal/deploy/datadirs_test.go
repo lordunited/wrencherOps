@@ -1,6 +1,10 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package deploy
 
 import (
+	"devops-wrapper/internal/sshexec"
 	"reflect"
 	"strings"
 	"testing"
@@ -50,7 +54,7 @@ func TestDataDirsMatchComposeMounts(t *testing.T) {
 
 func TestPrepareDirsCmd(t *testing.T) {
 	got := prepareDirsCmd([]DataDir{{"/opt/it's", "200:200"}})
-	want := `if [ "$(id -u)" -eq 0 ]; then AS_ROOT=""; else AS_ROOT="sudo -n"; fi` +
+	want := sshexec.AsRootPrelude + "true" +
 		` && $AS_ROOT mkdir -p '/opt/it'\''s' && { [ "$(stat -c %u:%g '/opt/it'\''s')" = '200:200' ] || $AS_ROOT chown -R '200:200' '/opt/it'\''s'; }`
 	if got != want {
 		t.Errorf("prepareDirsCmd:\n got %s\nwant %s", got, want)

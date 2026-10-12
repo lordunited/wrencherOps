@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+# Author: Mohammadreza Masoumi, DevOps Engineer
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -21,12 +24,26 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      # Always points at the postgres service above, whatever .env says.
-      DATABASE_URL: postgres://${POSTGRES_USER:-devops}:${POSTGRES_PASSWORD:-devops}@postgres:5432/${POSTGRES_DB:-devops_wrapper}
+      # NOTE: this deliberately does NOT point at the "postgres" service
+      # below. The real data (existing services, sessions, etc.) lives in a
+      # Postgres container that was started outside this compose project
+      # (published on the host's 5432) — the "postgres" service here is a
+      # separate, empty database. host.docker.internal reaches that
+      # existing container's published port from inside this one (Docker
+      # Desktop only). If/when everything is migrated onto the "postgres"
+      # service's own volume, switch this back to
+      # postgres://...@postgres:5432/... and restore the depends_on below.
+      DATABASE_URL: postgres://${POSTGRES_USER:-devops}:${POSTGRES_PASSWORD:-devops}@host.docker.internal:5432/${POSTGRES_DB:-devops_wrapper}
       PORT: "8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
+    volumes:
+      # OpenTofu's provider cache: big providers (AWS is ~600 MB) are
+      # downloaded once, not on every Terraform run.
+      - tofu-plugins:/var/cache/panel-tofu
+    ports:
+      # Published so a host-run frontend (next dev, API_BASE_URL defaulting
+      # to http://localhost:8080) can reach it without also being on the
+      # compose network.
+      - "8080:8080"
 
   web:
     build:
@@ -42,3 +59,4 @@ services:
 
 volumes:
   postgres-data:
+  tofu-plugins:

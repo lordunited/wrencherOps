@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 // Package nginxctl manages the configuration of an Nginx running in Docker
 // on a remote server: it reads the running configuration, presents its
 // server blocks and upstreams, generates new ones, and applies changes by
@@ -6,6 +9,7 @@ package nginxctl
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -211,16 +215,46 @@ type Server struct {
 	Return        string     `json:"return,omitempty"` // server-level return, e.g. a redirect
 	Locations     []Location `json:"locations"`
 	ProxyPass     string     `json:"proxyPass,omitempty"` // stream servers
+	Headers       []Header   `json:"headers,omitempty"`   // add_header directives set directly in this block
+}
+
+// Header is one add_header directive.
+type Header struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Always bool   `json:"always"`
+}
+
+// readHeaders collects the add_header directives set directly in ds — not
+// recursively, so a server's headers and a location's own don't merge (a
+// location that sets none of its own inherits the server's at runtime, but
+// showing them separately here reflects what's actually written where).
+func readHeaders(ds []*Directive) []Header {
+	var out []Header
+	for _, d := range all(ds, "add_header") {
+		if len(d.Args) < 2 {
+			continue
+		}
+		args := d.Args
+		always := false
+		if len(args) >= 3 && args[len(args)-1] == "always" {
+			always = true
+			args = args[:len(args)-1]
+		}
+		out = append(out, Header{Name: args[0], Value: strings.Join(args[1:], " "), Always: always})
+	}
+	return out
 }
 
 // Location is one location block inside a server.
 type Location struct {
-	Match     string `json:"match"` // e.g. "/", "= /healthz", "~ \.php$"
-	ProxyPass string `json:"proxyPass,omitempty"`
-	Return    string `json:"return,omitempty"`
-	Root      string `json:"root,omitempty"`
-	Alias     string `json:"alias,omitempty"`
-	TryFiles  string `json:"tryFiles,omitempty"`
+	Match     string   `json:"match"` // e.g. "/", "= /healthz", "~ \.php$"
+	ProxyPass string   `json:"proxyPass,omitempty"`
+	Return    string   `json:"return,omitempty"`
+	Root      string   `json:"root,omitempty"`
+	Alias     string   `json:"alias,omitempty"`
+	TryFiles  string   `json:"tryFiles,omitempty"`
+	Headers   []Header `json:"headers,omitempty"` // add_header directives set directly in this location
 }
 
 // Upstream is one upstream group of backends.
@@ -256,6 +290,10 @@ type Overview struct {
 	// ParseErrors lists files the panel couldn't read structurally; they
 	// still show as files and can be edited.
 	ParseErrors []string `json:"parseErrors,omitempty"`
+	// HeaderWarnings flags locations that clear a server's headers by
+	// declaring add_header themselves without repeating the rest — see
+	// headerRedefinitionWarnings.
+	HeaderWarnings []string `json:"headerWarnings,omitempty"`
 }
 
 // Build parses each file and collects servers, upstreams and globals.
@@ -277,7 +315,45 @@ func Build(files map[string]string, mainPath string) Overview {
 		walk(ds, path, ctx, &ov)
 	}
 	sortOverview(&ov)
+	ov.HeaderWarnings = headerRedefinitionWarnings(ov.Servers)
 	return ov
+}
+
+// headerRedefinitionWarnings flags the #1 real-world nginx security-header
+// mistake: add_header in a location does not merge with add_header in its
+// enclosing server — it replaces the whole set. A location that declares
+// any header of its own while missing others the server declares has
+// silently lost those, not inherited them.
+func headerRedefinitionWarnings(servers []Server) []string {
+	var warnings []string
+	for _, s := range servers {
+		if len(s.Headers) == 0 {
+			continue
+		}
+		for _, l := range s.Locations {
+			if len(l.Headers) == 0 {
+				continue
+			}
+			has := make(map[string]bool, len(l.Headers))
+			for _, h := range l.Headers {
+				has[h.Name] = true
+			}
+			var missing []string
+			for _, h := range s.Headers {
+				if !has[h.Name] {
+					missing = append(missing, h.Name)
+				}
+			}
+			if len(missing) == 0 {
+				continue
+			}
+			sort.Strings(missing)
+			warnings = append(warnings, fmt.Sprintf(
+				"location %s in %s:%d sets its own header(s) but not %s — those are cleared here, not inherited from the server block (add_header doesn't merge across blocks); repeat them in this location if they should still apply",
+				l.Match, s.File, s.Line, strings.Join(missing, ", ")))
+		}
+	}
+	return warnings
 }
 
 func joinArgs(d *Directive) string {
@@ -350,6 +426,7 @@ func readServer(d *Directive, file, ctx string) Server {
 	}
 	s.Return = joinArgs(find(d.Block, "return"))
 	s.ProxyPass = joinArgs(find(d.Block, "proxy_pass"))
+	s.Headers = readHeaders(d.Block)
 	var locs func(ds []*Directive, prefix string)
 	locs = func(ds []*Directive, prefix string) {
 		for _, l := range all(ds, "location") {
@@ -360,6 +437,7 @@ func readServer(d *Directive, file, ctx string) Server {
 				Root:      joinArgs(find(l.Block, "root")),
 				Alias:     joinArgs(find(l.Block, "alias")),
 				TryFiles:  joinArgs(find(l.Block, "try_files")),
+				Headers:   readHeaders(l.Block),
 			}
 			if loc.ProxyPass == "" {
 				loc.ProxyPass = joinArgs(find(l.Block, "fastcgi_pass"))

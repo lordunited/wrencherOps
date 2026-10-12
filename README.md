@@ -86,7 +86,33 @@ After changing `.env`, apply it with `docker compose up -d`.
 
 ## Signing in and out
 
-Open the panel and sign in with a username and password from `AUTH_USERS`. To sign out, click **Log out** in the top-right corner, next to your username. You are signed out automatically when your session expires, which is after 24 hours by default.
+Open the panel and sign in with a username and password from `AUTH_USERS`, or with a user an admin created in the panel. To sign out, click **Log out** in the top-right corner. You are signed out automatically when your session expires, which is after 24 hours by default.
+
+Click your name in the top-right corner to see what you can access and to change your password.
+
+---
+
+## Users and access
+
+The accounts in `AUTH_USERS` are built-in admins. They can't be changed or deleted from the panel, so there is always an admin who can sign in.
+
+Admins add more users in **Admin › Users & access**. Each user has a role:
+
+| Role | What it can do |
+|---|---|
+| **admin** | Everything, in every tab, including managing users and access |
+| **writer** | Exactly the access it's given, per tab: view or write |
+| **viewer** | Look only, never change anything, whatever it's given |
+
+Access is set per tab. Every page in the sidebar is listed, and each is set to **No access**, **View**, or **Write**. You can give access to a user directly, or to a group the user belongs to. A user gets the highest level from either, capped by their role. The GitLab pages and the run histories are view only for everyone.
+
+The backend checks access on every request, so hiding a page is not the only protection:
+
+- Users only see the tabs they have access to.
+- A page without access shows "You don't have access".
+- With view access, buttons that change things are hidden. If such a request is sent anyway, it's refused.
+
+Changes to a user's access apply on their next click. Disabling or deleting a user signs them out immediately. Changing a password signs out the user's other sessions.
 
 ---
 
@@ -252,6 +278,48 @@ Each service shows two badges.
 
 ---
 
+## Terraform standard
+
+Every Terraform workspace is checked against the panel's standard, which follows 30 Terraform concepts. You can see the result in a workspace's **Standards** tab. The code is checked as you edit and again before every plan.
+
+These rules are **enforced**: if your code breaks one, it isn't planned.
+
+| Rule | What it requires |
+|---|---|
+| TF001 | Every provider is in `required_providers` with a source and a version constraint |
+| TF002 | `required_version` is set |
+| TF003, TF004 | Every variable has a `type` and a `description` |
+| TF005 | Secret-like variables (password, token, key…) are `sensitive = true` and have no default |
+| TF006 | No secret is written in the code as a literal value |
+| TF007, TF008 | Every output has a `description`, and secret-like outputs are `sensitive` |
+| TF009 | Remote modules are pinned: `version` for registry modules, `?ref=` for Git |
+| TF010 | The code is formatted with `tofu fmt` (click **Format** in the code tab) |
+| TF011 | No `local` backend (the panel keeps the state) |
+| TF012 | Every variable without a default has a value in the workspace's variables |
+| TF013 | `count` and `for_each` are not used together |
+
+These are **advice** only: provisioners (TF014), `depends_on` (TF015), and `ignore_changes = all` (TF016).
+
+Plans also have these options:
+
+- **Replace:** plans chosen resources for replacement. This is what `terraform taint` became.
+- **Import:** adds an `import` block, so the next plan and apply bring an existing object under management.
+
+A plan that destroys or replaces anything needs the workspace's name typed before it can be applied.
+
+---
+
+## Tests
+
+```bash
+go test ./...            # backend unit tests
+cd web && npm test       # frontend unit tests
+```
+
+The end-to-end tests run only when `TEST_DATABASE_URL` is set. Point it at a throwaway Postgres, never at real data. The Terraform end-to-end test also needs `tofu` installed.
+
+---
+
 ## After installing
 
 - **GitLab:** open the external URL and sign in as `root` with the password you set. The first start can take 5 minutes or more.
@@ -292,4 +360,10 @@ Your services, logins, and saved passwords are kept in the database volume. Stop
 ## Tips
 
 - Serve the panel over HTTPS behind a reverse proxy, and then set `COOKIE_SECURE=true`.
-- Everyone who can sign in has full control over every service. Only give accounts to people who should manage your servers.
+- Give each person their own account in **Admin › Users & access**, with only the tabs they need. Keep the `AUTH_USERS` admins for yourself.
+
+---
+
+**Author:** Mohammadreza Masoumi — DevOps Engineer · <s.masoumimohammadreza@gmail.com>
+
+Copyright © 2026 Mohammadreza Masoumi.

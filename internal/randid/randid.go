@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 // Package randid generates URL-safe random identifiers, used anywhere this
 // backend needs an unguessable ID: session tokens, job IDs, service IDs.
 package randid

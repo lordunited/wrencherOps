@@ -1,5 +1,8 @@
-// Package auth handles panel login: username/password verification against
-// a small set of accounts, and session tracking.
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
+// Package auth handles panel login and session tracking. Who may do what
+// once signed in is package access's.
 package auth
 
 import (
@@ -9,12 +12,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/bcrypt"
 
 	"devops-wrapper/internal/randid"
 )
 
-// Users maps username to bcrypt password hash, loaded from AUTH_USERS.
+// Users maps username to bcrypt password hash, loaded from AUTH_USERS:
+// the built-in admin accounts.
 type Users map[string]string
 
 // ParseUsers parses the AUTH_USERS env format: "user1:hash1,user2:hash2".
@@ -36,15 +39,6 @@ func ParseUsers(raw string) (Users, error) {
 		return nil, fmt.Errorf("AUTH_USERS must contain at least one username:bcryptHash entry")
 	}
 	return users, nil
-}
-
-// Verify checks a username/password pair against the loaded accounts.
-func (u Users) Verify(username, password string) bool {
-	hash, ok := u[username]
-	if !ok {
-		return false
-	}
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
 // SessionStore persists sessions in Postgres, so logins survive a backend

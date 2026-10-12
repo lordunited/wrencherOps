@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -68,7 +71,7 @@ export function PrometheusRules({
         });
         if (!res.ok) {
           const text = await res.text();
-          if (text.includes("no password supplied")) {
+          if ((text.includes("no password supplied") || text.includes("no SSH password is saved"))) {
             setNeedPassword(true);
             return;
           }

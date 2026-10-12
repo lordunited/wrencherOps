@@ -1,6 +1,9 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 import type { StatusRole } from "@/lib/format";
 
-const ROLE_COLOR: Record<StatusRole, string> = {
+export const ROLE_COLOR: Record<StatusRole, string> = {
   good: "var(--status-good)",
   warning: "var(--status-warning)",
   serious: "var(--status-serious)",

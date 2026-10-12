@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package nginxctl
 
 import (
@@ -27,7 +30,7 @@ func IsNginxImage(image string) bool {
 
 // Discover finds the Nginx container of the compose project in deployDir.
 func Discover(c *sshexec.Client, deployDir string) (*dockerx.Container, error) {
-	out, errOut, err := c.Output("cd " + sshexec.ShellQuote(deployDir) + " && docker compose ps --all --format '{{.Name}}\t{{.Image}}'")
+	out, errOut, err := c.Output(sshexec.AsRootPrelude + sshexec.ComposeIn(deployDir) + " ps --all --format '{{.Name}}\t{{.Image}}'")
 	if err != nil {
 		return nil, fmt.Errorf("listing containers in %s failed: %v %s", deployDir, err, strings.TrimSpace(errOut))
 	}
@@ -121,22 +124,22 @@ func Inspect(c *sshexec.Client, ct *dockerx.Container) (*Report, error) {
 	var g errgroup.Group
 	g.SetLimit(4)
 	g.Go(func() error {
-		_, v, _ := c.Output("docker exec " + sshexec.ShellQuote(ct.Name) + " nginx -v")
+		_, v, _ := c.Output(sshexec.AsRoot("docker exec " + sshexec.ShellQuote(ct.Name) + " nginx -v"))
 		r.Version = strings.TrimPrefix(strings.TrimSpace(v), "nginx version: ")
 		return nil
 	})
 	g.Go(func() error {
-		out, errOut, err := c.Output("docker exec " + sshexec.ShellQuote(ct.Name) + " nginx -t")
+		out, errOut, err := c.Output(sshexec.AsRoot("docker exec " + sshexec.ShellQuote(ct.Name) + " nginx -t"))
 		r.TestOK = err == nil
 		r.TestOutput = strings.TrimSpace(out + errOut)
 		return nil
 	})
 	g.Go(func() error {
-		dumpOut, _, _ = c.Output("docker exec " + sshexec.ShellQuote(ct.Name) + " nginx -T")
+		dumpOut, _, _ = c.Output(sshexec.AsRoot("docker exec " + sshexec.ShellQuote(ct.Name) + " nginx -T"))
 		return nil
 	})
 	g.Go(func() error {
-		out, _, _ := c.Output("docker logs --tail 400 " + sshexec.ShellQuote(ct.Name) + " 2>&1 | grep -E '\\[(emerg|alert|crit|error)\\]' | tail -n 15")
+		out, _, _ := c.Output(sshexec.AsRoot("docker logs --tail 400 " + sshexec.ShellQuote(ct.Name) + " 2>&1 | grep -E '\\[(emerg|alert|crit|error)\\]' | tail -n 15"))
 		for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
 			if l = strings.TrimSpace(l); l != "" {
 				r.RecentErrors = append(r.RecentErrors, l)
@@ -145,7 +148,7 @@ func Inspect(c *sshexec.Client, ct *dockerx.Container) (*Report, error) {
 		return nil
 	})
 	g.Go(func() error {
-		out, _, _ := c.Output("docker stats --no-stream --format '{{json .}}' " + sshexec.ShellQuote(ct.Name))
+		out, _, _ := c.Output(sshexec.AsRoot("docker stats --no-stream --format '{{json .}}' " + sshexec.ShellQuote(ct.Name)))
 		var st struct{ CPUPerc, MemUsage, MemPerc, NetIO, PIDs string }
 		if json.Unmarshal([]byte(strings.TrimSpace(out)), &st) == nil {
 			r.Stats = Stats{CPU: st.CPUPerc, Memory: st.MemUsage, MemShare: st.MemPerc, NetIO: st.NetIO, PIDs: st.PIDs}
@@ -289,7 +292,7 @@ func Apply(c *sshexec.Client, ct *dockerx.Container, changes []Change, log io.Wr
 	}
 
 	fmt.Fprintln(log, "Testing the configuration (nginx -t)...")
-	out, errOut, err := c.Output("docker exec " + sshexec.ShellQuote(ct.Name) + " nginx -t")
+	out, errOut, err := c.Output(sshexec.AsRoot("docker exec " + sshexec.ShellQuote(ct.Name) + " nginx -t"))
 	test := strings.TrimSpace(out + errOut)
 	fmt.Fprintln(log, indent(test))
 	if err != nil {
@@ -299,15 +302,15 @@ func Apply(c *sshexec.Client, ct *dockerx.Container, changes []Change, log io.Wr
 	}
 
 	fmt.Fprintln(log, "Reloading Nginx gracefully (nginx -s reload)...")
-	if _, errOut, err := c.Output("docker exec " + sshexec.ShellQuote(ct.Name) + " nginx -s reload"); err != nil {
+	if _, errOut, err := c.Output(sshexec.AsRoot("docker exec " + sshexec.ShellQuote(ct.Name) + " nginx -s reload")); err != nil {
 		fmt.Fprintf(log, "Reload failed: %v %s\nPutting the previous files back...\n", err, strings.TrimSpace(errOut))
 		restoreAll()
-		c.Output("docker exec " + sshexec.ShellQuote(ct.Name) + " nginx -s reload")
+		c.Output(sshexec.AsRoot("docker exec " + sshexec.ShellQuote(ct.Name) + " nginx -s reload"))
 		return fmt.Errorf("Nginx did not reload; the previous files were restored")
 	}
 
 	// A new file only takes effect if something includes it.
-	dump, _, _ := c.Output("docker exec " + sshexec.ShellQuote(ct.Name) + " nginx -T")
+	dump, _, _ := c.Output(sshexec.AsRoot("docker exec " + sshexec.ShellQuote(ct.Name) + " nginx -T"))
 	for _, ch := range changes {
 		if !ch.Delete && ch.BaseSHA == "" && !strings.Contains(dump, "# configuration file "+ch.Path+":") {
 			fmt.Fprintf(log, "Note: %s is not included by nginx.conf, so it has no effect yet.\n", ch.Path)
@@ -327,8 +330,7 @@ func deleteFile(c *sshexec.Client, ct *dockerx.Container, p, stamp string) (stri
 		return "", err
 	}
 	if host, ok := ct.HostPath(p); ok {
-		cmd := `if [ "$(id -u)" -eq 0 ]; then AS_ROOT=""; else AS_ROOT="sudo -n"; fi; $AS_ROOT rm -f ` + sshexec.ShellQuote(host)
-		if _, errOut, err := c.Output(cmd); err != nil {
+		if _, errOut, err := c.Output(sshexec.AsRoot("rm -f " + sshexec.ShellQuote(host))); err != nil {
 			return "", fmt.Errorf("%v %s", err, errOut)
 		}
 		return host + " on the server (kept at " + dockerx.BackupPath(host, stamp) + ")", nil

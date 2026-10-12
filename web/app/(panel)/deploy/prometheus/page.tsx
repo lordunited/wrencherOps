@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 import { DeployTabs } from "@/components/DeployTabs";
 import { ServicesTable } from "@/components/ServicesTable";
 import { getServices } from "@/lib/api";

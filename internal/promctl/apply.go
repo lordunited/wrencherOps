@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package promctl
 
 import (
@@ -8,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"devops-wrapper/internal/dockerx"
 	"devops-wrapper/internal/sshexec"
 )
 
@@ -32,9 +36,9 @@ func BackupPath(p, stamp string) string {
 	return BackupRoot + path.Clean("/"+p) + "." + stamp
 }
 
-// asRoot runs the rest of a shell command as root: directly when the SSH
-// user is root, otherwise through passwordless sudo.
-const asRoot = `if [ "$(id -u)" -eq 0 ]; then AS_ROOT=""; else AS_ROOT="sudo -n"; fi; `
+// asRoot is the shared sudo prelude (see sshexec.AsRootPrelude): root
+// directly, else sudo — passwordless or with the SSH password.
+const asRoot = sshexec.AsRootPrelude
 
 // Apply validates changes with promtool, backs up and writes each file, and
 // hot-reloads Prometheus, confirming the reload took. Progress goes to log.
@@ -104,16 +108,11 @@ func indent(s string) string {
 
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 
+// exec builds a "docker exec" command against inst's container. A thin
+// wrapper over dockerx.Exec so call sites here can pass an *Instance
+// directly instead of pulling .Container out at every call site.
 func exec(inst *Instance, root bool, script string, args ...string) string {
-	cmd := "docker exec "
-	if root {
-		cmd += "-u 0 "
-	}
-	cmd += sshexec.ShellQuote(inst.Container) + " sh -c " + sshexec.ShellQuote(script) + " sh"
-	for _, a := range args {
-		cmd += " " + sshexec.ShellQuote(a)
-	}
-	return cmd
+	return dockerx.Exec(inst.Container, root, script, args...)
 }
 
 func checkBase(c *sshexec.Client, inst *Instance, changes []Change) error {
@@ -232,7 +231,7 @@ func restore(c *sshexec.Client, inst *Instance, written []Change, stamp string, 
 // reload newer than previous (or any successful reload when previous is
 // empty).
 func reload(c *sshexec.Client, inst *Instance, previous string) error {
-	if _, stderr, err := c.Output("docker kill -s HUP " + sshexec.ShellQuote(inst.Container)); err != nil {
+	if _, stderr, err := c.Output(sshexec.AsRoot("docker kill -s HUP " + sshexec.ShellQuote(inst.Container))); err != nil {
 		return fmt.Errorf("sending the reload signal failed: %v %s", err, strings.TrimSpace(stderr))
 	}
 	deadline := time.Now().Add(15 * time.Second)

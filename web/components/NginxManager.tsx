@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -11,8 +14,12 @@ import { loadSnapshot } from "@/lib/snapshots";
 const MAIN_CONFIG = "/etc/nginx/nginx.conf";
 
 // A tag for a config term, shown exactly as it's written in the config.
-function Term({ children }: { children: React.ReactNode }) {
-  return <span className="rounded-full bg-surface-1 px-2 py-0.5 font-mono text-[11px] font-semibold text-text-secondary">{children}</span>;
+function Term({ children, title }: { children: React.ReactNode; title?: string }) {
+  return (
+    <span title={title} className="rounded-full bg-surface-1 px-2 py-0.5 font-mono text-[11px] font-semibold text-text-secondary">
+      {children}
+    </span>
+  );
 }
 
 function target(s: NginxServer) {
@@ -65,7 +72,7 @@ export function NginxManager({
         }
         if (!res.ok) {
           const text = (await res.text()).trim();
-          if (text.includes("no password supplied")) {
+          if ((text.includes("no password supplied") || text.includes("no SSH password is saved"))) {
             setNeedPassword(true);
             return;
           }
@@ -219,7 +226,11 @@ export function NginxManager({
         </div>
       </section>
 
-      {(!report.testOk || report.recentErrors.length > 0 || (ov.parseErrors?.length ?? 0) > 0 || !report.newFileDirOnDisk) && (
+      {(!report.testOk ||
+        report.recentErrors.length > 0 ||
+        (ov.parseErrors?.length ?? 0) > 0 ||
+        (ov.headerWarnings?.length ?? 0) > 0 ||
+        !report.newFileDirOnDisk) && (
         <section className="card flex flex-col gap-3 p-4 sm:p-5">
           <h2 className="section-title">Needs attention</h2>
           {!report.testOk && (
@@ -241,6 +252,11 @@ export function NginxManager({
             <p key={e} className="rounded-2xl bg-surface-2 px-4 py-3 text-sm text-text-secondary">
               <span className="font-bold text-status-warning">Couldn&apos;t read the structure of</span> <span className="font-mono">{e}</span>. It still
               appears under Config files and can be edited.
+            </p>
+          ))}
+          {(ov.headerWarnings ?? []).map((w) => (
+            <p key={w} className="rounded-2xl bg-surface-2 px-4 py-3 text-sm text-text-secondary">
+              <span className="font-bold text-status-warning">Header cleared by a location:</span> {w}
             </p>
           ))}
           {report.recentErrors.length > 0 && (
@@ -268,7 +284,7 @@ export function NginxManager({
       <div ref={editorRef}>
         {editor && report && (
           <NginxChangeEditor
-            key={editor.kind === "server" ? "server" : `${editor.kind}:${editor.file.path}`}
+            key={editor.kind === "server" || editor.kind === "newfile" ? editor.kind : `${editor.kind}:${editor.file.path}`}
             serviceId={serviceId}
             password={password}
             report={report}
@@ -300,6 +316,19 @@ export function NginxManager({
                   <span className="ml-auto font-mono text-xs text-text-muted">listen {s.listen.join(", ") || "80"}</span>
                 </div>
                 <p className="break-all font-mono text-xs text-text-secondary">{target(s)}</p>
+                {(() => {
+                  const headers = [...(s.headers ?? []), ...s.locations.flatMap((l) => l.headers ?? [])];
+                  if (headers.length === 0) return null;
+                  return (
+                    <div className="flex flex-wrap gap-1.5">
+                      {headers.map((h, i) => (
+                        <Term key={`${h.name}-${i}`} title={`${h.value}${h.always ? " (always)" : ""}`}>
+                          {h.name}
+                        </Term>
+                      ))}
+                    </div>
+                  );
+                })()}
                 {s.locations.length > 1 && (
                   <ul className="flex flex-col gap-0.5 border-l-2 border-border pl-3">
                     {s.locations.map((l, i) => (
@@ -372,10 +401,19 @@ export function NginxManager({
       </section>
 
       <section className="card flex flex-col gap-3 p-4 sm:p-5">
-        <h2 className="section-title">Config files</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="section-title">Config files</h2>
+          <Button variant="secondary" onClick={() => openEditor({ kind: "newfile" })} disabled={stale}>
+            + New config file
+          </Button>
+        </div>
         <p className="text-sm text-text-muted">
           Every file Nginx loads, as <span className="font-mono">nginx -T</span> lists them. Edits get a before/after review and an{" "}
-          <span className="font-mono">nginx -t</span> check before Nginx reloads.
+          <span className="font-mono">nginx -t</span> check before Nginx reloads. A new file is written into{" "}
+          <span className="font-mono">{report.newFileDir}</span>
+          {report.newFileDirOnDisk
+            ? ", which is mounted from the server — so it lands on the volume, not just inside the container."
+            : " — which isn't mounted from the server, so it would only exist inside the container and be lost on recreate."}
         </p>
         <ul className="flex flex-col gap-1.5">
           {report.files.map((f) => (

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package deploy
 
 import "fmt"
@@ -170,6 +173,46 @@ func ExamplePrometheusStackConfig_ComposeYAML() {
 	//           access: proxy
 	//           url: http://prometheus:9090
 	//           isDefault: true
+	//
+	// networks:
+	//   shared_net:
+}
+
+func ExampleHAProxyConfig_ComposeYAML() {
+	cfg := HAProxyConfig{
+		HTTPPort:      80,
+		HTTPSPort:     443,
+		ImageTag:      "lts-alpine",
+		DeployDir:     "/opt/haproxy",
+		ContainerName: "haproxy",
+		Networks:      []string{"shared_net"},
+		ExtraVolumes:  []string{"/opt/haproxy/certs:/etc/haproxy/certs:ro"},
+		CPULimit:      "1",
+		MemoryLimit:   "512m",
+	}
+	fmt.Print(cfg.ComposeYAML())
+	// Output:
+	// services:
+	//   haproxy:
+	//     image: haproxy:lts-alpine
+	//     container_name: haproxy
+	//     restart: always
+	//     ports:
+	//       - '80:80'
+	//       - '443:443'
+	//     volumes:
+	//       - '/opt/haproxy/conf:/usr/local/etc/haproxy'
+	//       - '/opt/haproxy/certs:/etc/haproxy/certs:ro'
+	//     cpus: '1'
+	//     mem_limit: 512m
+	//     healthcheck:
+	//       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:80/healthz"]
+	//       interval: 30s
+	//       timeout: 10s
+	//       retries: 3
+	//       start_period: 10s
+	//     networks:
+	//       - shared_net
 	//
 	// networks:
 	//   shared_net:

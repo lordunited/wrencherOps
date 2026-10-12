@@ -1,8 +1,11 @@
-import Link from "next/link";
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
+import { WriteOnly } from "@/components/Access";
+import { BulkServiceActions } from "@/components/BulkServiceActions";
+import { ServiceCards } from "@/components/ServiceCards";
 import { LinkButton } from "@/components/Button";
-import { StatusBadge } from "@/components/StatusBadge";
 import type { Service } from "@/lib/api";
-import { serviceHealthRole, serviceStatusRole } from "@/lib/format";
 
 export function ServicesTable({
   title,
@@ -28,14 +31,16 @@ export function ServicesTable({
           <h1 className="page-title">{title}</h1>
           <p className="mt-1 text-sm text-text-secondary">{description}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {extraAction && (
-            <LinkButton href={extraAction.href} variant="secondary">
-              {extraAction.label}
-            </LinkButton>
-          )}
-          <LinkButton href={newHref}>{newLabel}</LinkButton>
-        </div>
+        <WriteOnly>
+          <div className="flex flex-wrap gap-2">
+            {extraAction && (
+              <LinkButton href={extraAction.href} variant="secondary">
+                {extraAction.label}
+              </LinkButton>
+            )}
+            <LinkButton href={newHref}>{newLabel}</LinkButton>
+          </div>
+        </WriteOnly>
       </div>
 
       {services.length === 0 ? (
@@ -46,34 +51,9 @@ export function ServicesTable({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {services.map((svc) => (
-            <Link
-              key={svc.id}
-              href={`${basePath}/${svc.id}`}
-              className="card flex flex-col gap-3 p-5 transition-transform hover:-translate-y-0.5"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <span className="min-w-0 truncate text-base font-bold text-text-primary">
-                  {svc.name}
-                  {svc.origin === "connected" && (
-                    <span className="ml-2 align-middle text-[11px] font-semibold text-text-muted">connected</span>
-                  )}
-                </span>
-                <StatusBadge role={serviceStatusRole(svc.status)} label={svc.status} />
-              </div>
-              <span className="truncate font-mono text-xs text-text-secondary">
-                {svc.username}@{svc.host}:{svc.port}
-              </span>
-              <div className="flex items-center justify-between gap-2">
-                <StatusBadge role={serviceHealthRole(svc.health)} label={svc.health} />
-                <span className="text-xs text-text-muted">
-                  Updated {new Date(svc.updatedAt).toLocaleDateString()}
-                </span>
-              </div>
-            </Link>
-          ))}
-        </div>
+        <BulkServiceActions items={services.map((s) => ({ id: s.id, name: s.name, host: s.host }))}>
+          <ServiceCards services={services} basePath={basePath} />
+        </BulkServiceActions>
       )}
     </div>
   );

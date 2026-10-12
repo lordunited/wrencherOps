@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 // hashpassword prints a bcrypt hash for a password, for building AUTH_USERS
 // entries (username:hash,username2:hash2).
 package main

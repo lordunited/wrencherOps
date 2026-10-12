@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 // Package secretbox encrypts small secrets (SSH passwords) at rest with
 // AES-256-GCM, so a database dump doesn't hand over plaintext credentials.
 // The encryption key itself is only as safe as CREDENTIAL_ENCRYPTION_KEY —

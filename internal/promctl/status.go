@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 package promctl
 
 import (
@@ -128,7 +131,7 @@ func Status(c *sshexec.Client, inst *Instance) (*ServerStatus, error) {
 
 func selfMetricsText(c *sshexec.Client, inst *Instance) (string, error) {
 	url := fmt.Sprintf("http://127.0.0.1:%s%s/metrics", inst.Port, inst.RoutePrefix)
-	out, errOut, err := c.Output("docker exec " + sshexec.ShellQuote(inst.Container) + " wget -qO- " + sshexec.ShellQuote(url))
+	out, errOut, err := c.Output(sshexec.AsRoot("docker exec " + sshexec.ShellQuote(inst.Container) + " wget -qO- " + sshexec.ShellQuote(url)))
 	if err != nil {
 		return "", fmt.Errorf("%v %s", err, errOut)
 	}
@@ -174,6 +177,10 @@ func parseMetrics(text string, wanted []string) map[string]float64 {
 
 // measureDisk sizes the TSDB folder, its WAL, its blocks, and the free
 // space of the filesystem it lives on, using busybox tools in the image.
+// df's row is read counting from its end: busybox df (without -P, or in
+// older builds) wraps a long device name — /dev/mapper/ubuntu--vg-... —
+// onto a line of its own, which shifted every column and read the "Use%"
+// figure as free space, reporting a healthy disk as full.
 func measureDisk(c *sshexec.Client, inst *Instance, dataPath string) Disk {
 	d := Disk{DataPath: dataPath}
 	script := `D="$1"
@@ -181,7 +188,7 @@ echo "data $(du -sk "$D" 2>/dev/null | cut -f1)"
 echo "wal $(du -sk "$D/wal" 2>/dev/null | cut -f1)"
 echo "segments $(ls "$D/wal" 2>/dev/null | grep -c '^[0-9]')"
 echo "blocks $(ls "$D" 2>/dev/null | grep -c '^01')"
-df -k "$D" 2>/dev/null | tail -1 | awk '{print "fs " $2 " " $4}'`
+df -Pk "$D" 2>/dev/null | tail -n +2 | tr '\n' ' ' | awk '{print "fs " $(NF-4) " " $(NF-2)}'`
 	out, errOut, err := c.Output(exec(inst, false, script, dataPath))
 	if err != nil {
 		d.Error = strings.TrimSpace(errOut)
@@ -203,10 +210,13 @@ df -k "$D" 2>/dev/null | tail -1 | awk '{print "fs " $2 " " $4}'`
 		case "blocks":
 			d.Blocks = int(n)
 		case "fs":
-			d.FSSizeBytes = n * 1024
-			if len(f) > 2 {
-				free, _ := strconv.ParseInt(f[2], 10, 64)
-				d.FSFreeBytes = free * 1024
+			// Size and free space, or neither: a figure that doesn't parse
+			// mustn't read as "0 bytes free".
+			size, err1 := strconv.ParseInt(f[1], 10, 64)
+			if len(f) > 2 && err1 == nil {
+				if free, err := strconv.ParseInt(f[2], 10, 64); err == nil {
+					d.FSSizeBytes, d.FSFreeBytes = size*1024, free*1024
+				}
 			}
 		}
 	}

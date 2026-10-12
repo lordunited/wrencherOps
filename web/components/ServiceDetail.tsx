@@ -1,5 +1,9 @@
+// Copyright (c) 2026 Mohammadreza Masoumi <s.masoumimohammadreza@gmail.com>
+// Author: Mohammadreza Masoumi, DevOps Engineer
+
 "use client";
 
+import { useCanWrite } from "@/components/Access";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -9,11 +13,15 @@ import { StatTile } from "@/components/StatTile";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ControlsWarmup } from "@/components/ControlsWarmup";
 import { NginxManager } from "@/components/NginxManager";
+import { EnvoyManager } from "@/components/EnvoyManager";
+import { HAProxyManager } from "@/components/HAProxyManager";
 import { PrometheusRules } from "@/components/PrometheusRules";
 import { PrometheusStatus } from "@/components/PrometheusStatus";
 import { ServiceHistory } from "@/components/ServiceHistory";
 import { YamlEditor } from "@/components/YamlEditor";
 import type { DeployJob, Service, ServiceStatus } from "@/lib/api";
+import { ServiceContainers } from "@/components/ServiceContainers";
+import { ServicePorts } from "@/components/ServicePorts";
 import { serviceHealthRole, serviceStatusRole, type StatusRole } from "@/lib/format";
 
 const FIELD_CLASS =
@@ -63,6 +71,13 @@ const CONTROL_SUCCESS_STATUS: Record<ControlAction, ServiceStatus> = {
   down: "down",
 };
 
+// What the panel does with a connected stack of each type, beyond watching it.
+const CONNECTED_SCOPE: Record<string, string> = {
+  prometheus: "The panel manages its Prometheus rules and targets only.",
+  nginx: "The panel manages its Nginx configuration only.",
+  haproxy: "The panel manages its HAProxy configuration only.",
+};
+
 export function ServiceDetail({
   initial,
   backHref,
@@ -101,10 +116,18 @@ export function ServiceDetail({
   const [controlPassword, setControlPassword] = useState("");
   const [controlBusy, setControlBusy] = useState(false);
 
-  const [confirmingDestroy, setConfirmingDestroy] = useState(false);
+  // Delete asks for approval in the page first: "teardown" deletes the
+  // containers and their data (typing the name approves it), "record" only
+  // removes the panel's record.
+  const [deleteMode, setDeleteMode] = useState<"teardown" | "record" | null>(null);
+  const canWrite = useCanWrite();
+  const [approval, setApproval] = useState("");
   const [destroyPassword, setDestroyPassword] = useState("");
 
   const isConnected = service.origin === "connected";
+  // A server of a custom compose app: its compose, folder and name are the
+  // app's, edited on the app page so every server stays the same.
+  const isMember = !!service.appId;
   // Panel-deployed Compose stacks always have Start/Stop/Down. A connected
   // Compose stack shows them too, but they stay locked until the panel has
   // watched it stay healthy for 5 minutes in a row.
@@ -115,7 +138,9 @@ export function ServiceDetail({
   const hasPrometheus =
     service.type === "prometheus" || (service.type === "docker" && service.manifest.includes("prom/prometheus"));
   const isNginx = service.type === "nginx";
-  type Tab = "service" | "rules" | "status" | "nginx";
+  const isHAProxy = service.type === "haproxy";
+  const isEnvoy = service.type === "envoy";
+  type Tab = "service" | "rules" | "status" | "nginx" | "haproxy" | "envoy";
   const tabs: [Tab, string][] = hasPrometheus
     ? [
         ["service", "Service"],
@@ -127,8 +152,20 @@ export function ServiceDetail({
           ["service", "Service"],
           ["nginx", "Nginx config"],
         ]
-      : [];
-  const [tab, setTab] = useState<Tab>(isConnected && hasPrometheus ? "rules" : isConnected && isNginx ? "nginx" : "service");
+      : isHAProxy
+        ? [
+            ["service", "Service"],
+            ["haproxy", "HAProxy config"],
+          ]
+        : isEnvoy
+          ? [
+              ["service", "Service"],
+              ["envoy", "Envoy"],
+            ]
+          : [];
+  const [tab, setTab] = useState<Tab>(
+    isConnected && hasPrometheus ? "rules" : isConnected && isNginx ? "nginx" : isConnected && isHAProxy ? "haproxy" : isConnected && isEnvoy ? "envoy" : "service",
+  );
   const tabKeys = tabs.map(([k]) => k).join(",");
   useEffect(() => {
     const fromHash = window.location.hash.slice(1) as Tab;
@@ -278,7 +315,8 @@ export function ServiceDetail({
       }
       const { jobId } = await res.json();
       setDestroyPassword("");
-      setConfirmingDestroy(false);
+      setDeleteMode(null);
+      setApproval("");
       setService((s) => ({ ...s, status: "removing" }));
       setJob({ id: jobId, status: "running", log: [], startedAt: "", updatedAt: "" });
       pollDestroyJob(jobId);
@@ -313,29 +351,13 @@ export function ServiceDetail({
   const needsTeardown = isCompose && service.status !== "pending";
 
   function handleDeleteClick() {
-    if (isConnected) {
-      if (confirm(`Remove "${service.name}" from the panel? Nothing on the server changes: its containers, config and data stay as they are.`)) {
-        removeRecordOnly();
-      }
-      return;
-    }
-    if (!needsTeardown) {
-      const message = isCompose
-        ? `Delete "${service.name}"? This only removes the record — nothing has been deployed yet.`
-        : `Delete "${service.name}"? This only removes the record — it won't touch anything already applied to the cluster.`;
-      if (confirm(message)) removeRecordOnly();
-      return;
-    }
-    const confirmed = confirm(
-      `Delete "${service.name}"? This runs "docker compose down -v" and permanently deletes ${service.deployDir} on the server — containers, networks, volumes, and all data. This cannot be undone.`,
-    );
-    if (!confirmed) return;
-    if (service.hasSavedPassword) {
-      destroyAndDelete("");
-    } else {
-      setConfirmingDestroy(true);
-    }
+    setApproval("");
+    setDestroyPassword("");
+    setDeleteMode(isConnected || !needsTeardown ? "record" : "teardown");
   }
+
+  const containerNames = (service.healthStats ?? []).map((c) => c.name);
+  const approved = approval.trim() === service.name.trim();
 
   function pollJob(jobId: string, successStatus: ServiceStatus) {
     pollRef.current = setInterval(async () => {
@@ -480,7 +502,7 @@ export function ServiceDetail({
           >
             {syncing ? "Syncing…" : "Sync"}
           </Button>
-          {showControls && (
+          {showControls && canWrite && (
             <>
               <Button
                 variant="success"
@@ -508,12 +530,153 @@ export function ServiceDetail({
               </Button>
             </>
           )}
-          <Button variant="danger" onClick={handleDeleteClick} disabled={deleting || busy}>
-            {deleting ? "Removing…" : isConnected ? "Remove from panel" : "Delete"}
-          </Button>
+          {canWrite && (
+            <Button variant="danger" onClick={handleDeleteClick} disabled={deleting || busy}>
+              {deleting ? "Removing…" : isConnected ? "Remove from panel" : "Delete"}
+            </Button>
+          )}
         </div>
       </div>
 
+      {deleteMode === "teardown" && (
+        <div className="card flex flex-col gap-3 border-l-4 p-4 sm:p-5" style={{ borderLeftColor: "var(--status-critical)" }} role="alertdialog" aria-labelledby="delete-title">
+          <p id="delete-title" className="text-base font-bold text-status-critical">
+            ⚠ You are deleting {containerNames.length === 1 ? "a container" : "containers"} and all their data
+          </p>
+          <p className="text-sm text-text-primary">
+            Deleting <b>{service.name}</b> runs <span className="font-mono">docker compose down -v</span> on{" "}
+            <span className="font-mono">{host}</span>. It stops and <b>deletes its containers</b>
+            {containerNames.length > 0 && (
+              <>
+                {" "}
+                (<span className="font-mono">{containerNames.join(", ")}</span>)
+              </>
+            )}
+            , their networks and <b>volumes — all their data</b>, then deletes the folder{" "}
+            <span className="font-mono">{service.deployDir}</span>. This cannot be undone.
+          </p>
+          <label className="flex max-w-md flex-col gap-1 text-sm text-text-secondary">
+            <span>
+              To approve, type the service&apos;s name: <b className="font-mono text-text-primary">{service.name}</b>
+            </span>
+            <input
+              value={approval}
+              onChange={(e) => setApproval(e.target.value)}
+              className="field font-mono"
+              autoComplete="off"
+              spellCheck={false}
+              autoFocus
+              aria-label="Type the service name to approve deleting its containers"
+            />
+          </label>
+          {!service.hasSavedPassword && (
+            <div className="max-w-md">
+              <SshPassword label={`SSH password for ${username}@${host}`} saved={false} value={destroyPassword} onChange={setDestroyPassword} />
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="danger"
+              onClick={() => destroyAndDelete(destroyPassword)}
+              disabled={!approved || (!destroyPassword && !service.hasSavedPassword) || busy || deleting}
+            >
+              {deleting ? "Deleting…" : "Delete containers and data"}
+            </Button>
+            <Button variant="secondary" onClick={removeRecordOnly} disabled={busy || deleting} title="Keeps the containers, volumes and files on the server">
+              Remove from panel only
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setDeleteMode(null);
+                setApproval("");
+                setDestroyPassword("");
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+          <p className="text-xs text-text-muted">
+            Only want it gone from this list? <b>Remove from panel only</b> deletes nothing on the server.
+          </p>
+        </div>
+      )}
+
+      {deleteMode === "record" && (
+        <div className="card flex flex-col gap-3 border-l-4 p-4 sm:p-5" style={{ borderLeftColor: "var(--status-warning)" }} role="alertdialog" aria-labelledby="remove-title">
+          <p id="remove-title" className="text-base font-bold text-text-primary">
+            Remove {service.name} from the panel?
+          </p>
+          <p className="text-sm text-text-primary">
+            This only removes the panel&apos;s record. <b>No container is deleted</b>:{" "}
+            {isConnected
+              ? `its containers, config and data on ${host} stay exactly as they are and keep running.`
+              : isCompose
+                ? "nothing has been deployed for it yet, so there's nothing on the server to delete."
+                : "nothing already applied to the cluster is touched."}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="danger" onClick={removeRecordOnly} disabled={busy || deleting}>
+              {deleting ? "Removing…" : "Yes, remove from the panel"}
+            </Button>
+            <Button variant="secondary" onClick={() => setDeleteMode(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {controlAction && (
+        <div className="card flex flex-col gap-3 p-4">
+          <p className="text-sm text-text-primary">
+            {controlAction === "down" ? (
+              <>
+                <b className="text-status-critical">⚠ Down deletes the containers</b> of {service.name} on {host} (
+                <span className="font-mono">docker compose down</span>). Volumes and data are kept, and Start or Deploy
+                creates the containers again.
+              </>
+            ) : controlAction === "stop" ? (
+              <>
+                Stop stops the containers of {service.name} on {host}; nothing is deleted.
+              </>
+            ) : (
+              <>
+                Start starts the containers of {service.name} on {host}.
+              </>
+            )}
+          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <SshPassword
+              label={`SSH password for ${username}@${host}`}
+              saved={service.hasSavedPassword}
+              value={controlPassword}
+              onChange={setControlPassword}
+            />
+            <Button
+              variant={controlAction === "down" ? "danger" : controlAction === "stop" ? "warning" : "success"}
+              onClick={() => runControl(controlAction, controlPassword)}
+              disabled={(!controlPassword && !service.hasSavedPassword) || busy}
+            >
+              {controlBusy
+                ? "Working…"
+                : controlAction === "start"
+                  ? "Confirm start"
+                  : controlAction === "stop"
+                    ? "Confirm stop"
+                    : "Confirm down"}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setControlAction(null);
+                setControlPassword("");
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
       {showControls && controlsLocked && <ControlsWarmup service={service} onUpdate={setService} />}
 
       {tabs.length > 0 && (
@@ -545,6 +708,10 @@ export function ServiceDetail({
         <PrometheusStatus serviceId={service.id} />
       ) : tab === "nginx" && isNginx ? (
         <NginxManager serviceId={service.id} hasSavedPassword={service.hasSavedPassword} sshLabel={`${service.username}@${service.host}`} />
+      ) : tab === "envoy" && isEnvoy ? (
+        <EnvoyManager serviceId={service.id} hasSavedPassword={service.hasSavedPassword} sshLabel={`${service.username}@${service.host}`} />
+      ) : tab === "haproxy" && isHAProxy ? (
+        <HAProxyManager serviceId={service.id} hasSavedPassword={service.hasSavedPassword} sshLabel={`${service.username}@${service.host}`} />
       ) : (
       <>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -572,77 +739,9 @@ export function ServiceDetail({
         />
       </div>
 
-      {confirmingDestroy && (
-        <div className="card flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
-          <label className={LABEL_CLASS}>
-            SSH password for {username}@{host}
-            <input
-              type="password"
-              value={destroyPassword}
-              onChange={(e) => setDestroyPassword(e.target.value)}
-              className={FIELD_CLASS}
-              placeholder={service.hasSavedPassword ? "leave blank to use saved password" : ""}
-              autoComplete="off"
-              autoFocus
-            />
-          </label>
-          <Button
-            variant="danger"
-            onClick={() => destroyAndDelete(destroyPassword)}
-            disabled={(!destroyPassword && !service.hasSavedPassword) || busy}
-          >
-            {deleting ? "Working…" : "Confirm delete"}
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setConfirmingDestroy(false);
-              setDestroyPassword("");
-            }}
-          >
-            Cancel
-          </Button>
-        </div>
-      )}
+      <ServicePorts ports={service.healthPorts} host={service.host} checkedAt={service.lastSyncedAt} />
+      <ServiceContainers containers={service.healthContainers} stats={service.healthStats} />
 
-      {controlAction && (
-        <div className="card flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
-          <label className={LABEL_CLASS}>
-            SSH password for {username}@{host}
-            <input
-              type="password"
-              value={controlPassword}
-              onChange={(e) => setControlPassword(e.target.value)}
-              className={FIELD_CLASS}
-              placeholder={service.hasSavedPassword ? "leave blank to use saved password" : ""}
-              autoComplete="off"
-              autoFocus
-            />
-          </label>
-          <Button
-            variant={controlAction === "down" ? "danger" : controlAction === "stop" ? "warning" : "success"}
-            onClick={() => runControl(controlAction, controlPassword)}
-            disabled={(!controlPassword && !service.hasSavedPassword) || busy}
-          >
-            {controlBusy
-              ? "Working…"
-              : controlAction === "start"
-                ? "Confirm start"
-                : controlAction === "stop"
-                  ? "Confirm stop"
-                  : "Confirm down"}
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setControlAction(null);
-              setControlPassword("");
-            }}
-          >
-            Cancel
-          </Button>
-        </div>
-      )}
 
       {service.hasSavedPassword && !showSyncPassword && (
         <button
@@ -684,7 +783,7 @@ export function ServiceDetail({
       <section className="card flex flex-col gap-4 p-4 sm:p-5">
         <div className="flex items-center justify-between gap-3">
           <h2 className="section-title">Connection</h2>
-          {isConnected && (
+          {(isConnected || isMember) && canWrite && (
             <div className="flex items-center gap-3">
               {justSaved && <span className="text-xs text-status-good">Saved</span>}
               <Button variant="secondary" onClick={handleSave} disabled={busy}>
@@ -696,7 +795,7 @@ export function ServiceDetail({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label className={LABEL_CLASS}>
             Name
-            <input value={name} onChange={(e) => setName(e.target.value)} className={FIELD_CLASS} />
+            <input value={name} onChange={(e) => setName(e.target.value)} className={FIELD_CLASS} readOnly={isMember} />
           </label>
           <label className={LABEL_CLASS}>
             Host
@@ -725,18 +824,44 @@ export function ServiceDetail({
               value={deployDir}
               onChange={(e) => setDeployDir(e.target.value)}
               className={FIELD_CLASS}
-              readOnly={isConnected}
+              readOnly={isConnected || isMember}
             />
           </label>
+          {service.type === "signoz" && (
+            <p className="text-xs text-text-muted sm:col-span-2 lg:col-span-4">
+              SigNoz UI:{" "}
+              <a href={`http://${service.host.trim()}:8080`} target="_blank" rel="noreferrer" className="font-mono font-semibold text-accent hover:underline">
+                http://{service.host.trim()}:8080
+              </a>{" "}
+              (the default port; first start takes a few minutes). Send telemetry over OTLP to port 4317 (gRPC) or 4318
+              (HTTP) on the same host.
+            </p>
+          )}
+          {isMember && (
+            <p className="text-xs text-text-muted sm:col-span-2 lg:col-span-4">
+              This server is part of{" "}
+              <Link href={backHref} className="font-semibold text-accent hover:underline">
+                {backLabel}
+              </Link>
+              . Its compose file, folder and name are the app&apos;s — edit them there and every server gets the change.
+            </p>
+          )}
           {isConnected && (
             <p className="text-xs text-text-muted sm:col-span-2 lg:col-span-4">
-              Connected to container <span className="font-mono">{service.container}</span>
+              {service.container ? (
+                <>
+                  Connected to container <span className="font-mono">{service.container}</span>
+                  {service.composeProject ? " in " : ""}
+                </>
+              ) : (
+                "Watching "
+              )}
               {service.composeProject ? (
                 <>
-                  {" "}in Compose project <span className="font-mono">{service.composeProject}</span>
+                  Compose project <span className="font-mono">{service.composeProject}</span>
                 </>
               ) : null}
-              . The panel manages its Prometheus configuration only.
+              . {CONNECTED_SCOPE[service.type] ?? "The panel only watches it; it never deploys, edits or removes it."}
             </p>
           )}
         </div>
@@ -747,11 +872,15 @@ export function ServiceDetail({
           <h2 className="section-title">
             {isConnected
               ? "Compose file (read-only copy from the server)"
-              : service.type === "kubernetes"
-                ? "Manifest"
-                : "docker-compose.yml"}
+              : isMember
+                ? "Compose file (from the app)"
+                : service.type === "kubernetes"
+                  ? "Manifest"
+                  : service.type === "signoz"
+                    ? "casting.yaml (SigNoz installer)"
+                    : "docker-compose.yml"}
           </h2>
-          {!isConnected && (
+          {!isConnected && !isMember && canWrite && (
             <div className="flex items-center gap-3">
               {justSaved && <span className="text-xs text-status-good">Saved</span>}
               <Button variant="secondary" onClick={handleSave} disabled={busy}>
@@ -760,10 +889,10 @@ export function ServiceDetail({
             </div>
           )}
         </div>
-        <YamlEditor value={manifest} onChange={setManifest} readOnly={busy || isConnected} />
+        <YamlEditor value={manifest} onChange={setManifest} readOnly={busy || isConnected || isMember || !canWrite} />
       </section>
 
-      {!isConnected && (
+      {!isConnected && canWrite && (
       <section className="card flex flex-col gap-3 p-4 sm:p-5">
         <h2 className="section-title">Deploy</h2>
         {!showPassword ? (
@@ -837,5 +966,47 @@ export function ServiceDetail({
       </>
       )}
     </div>
+  );
+}
+
+// SshPassword asks for the SSH password only when none is saved for this
+// server; with one saved it just says so, with a way to type another.
+function SshPassword({
+  label,
+  saved,
+  value,
+  onChange,
+}: {
+  label: string;
+  saved: boolean;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [typing, setTyping] = useState(false);
+  if (saved && !typing) {
+    return (
+      <div className={LABEL_CLASS}>
+        {label}
+        <span className="flex h-[38px] items-center gap-2 text-sm text-status-good">
+          Saved ✓
+          <button type="button" onClick={() => setTyping(true)} className="text-xs font-semibold text-accent hover:underline">
+            use another
+          </button>
+        </span>
+      </div>
+    );
+  }
+  return (
+    <label className={LABEL_CLASS}>
+      {label}
+      <input
+        type="password"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={FIELD_CLASS}
+        autoComplete="off"
+        autoFocus
+      />
+    </label>
   );
 }
