@@ -1,14 +1,42 @@
-# devops-wrapper
+<div align="center">
 
-devops-wrapper is a web panel for day-to-day DevOps work. From one place you can:
+# 🛠️ devops-wrapper
 
-- **Watch GitLab.** See projects, pipelines, merge requests, runners, and users, with a health page that flags what needs attention.
-- **Watch your servers.** The panel logs in to each server over SSH every minute, reads its disks, memory, load, logins, kernel errors, and connections, and raises alerts from rules you control.
-- **Run Ansible playbooks** on those servers. Write them in the panel or upload a project, dry-run them, then apply them, with a full log of every run.
-- **Run Terraform** with OpenTofu. Keep workspaces in the panel, plan, review, and apply exactly the plan you reviewed. The panel keeps the state, encrypted, and checks the code against a built-in standard.
-- **Install and manage tools on your servers.** Fill in a form and click Deploy to set up GitLab, Nexus3, a Prometheus and Grafana stack, Nginx, HAProxy, Envoy, SigNoz, or your own Compose project. You can also connect stacks you already run. After that you can start, stop, check, reconfigure, or remove them from the same page.
+**One web panel for day-to-day DevOps work: GitLab, servers, Ansible, Terraform, and the tools you deploy.**
 
-The sidebar has one section for each of these: **GitLab**, **Servers**, **Ansible**, **Terraform**, **Deploy**, and **Admin**. Who sees which page is set per user in **Admin**.
+<p>
+  <img alt="Go 1.27" src="https://img.shields.io/badge/Go-1.27-00ADD8?style=flat-square&logo=go&logoColor=white">
+  <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=nextdotjs&logoColor=white">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black">
+  <img alt="PostgreSQL 17" src="https://img.shields.io/badge/PostgreSQL-17-4169E1?style=flat-square&logo=postgresql&logoColor=white">
+  <img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white">
+  <img alt="OpenTofu" src="https://img.shields.io/badge/OpenTofu-Terraform-FFDA18?style=flat-square&logo=opentofu&logoColor=black">
+  <img alt="Ansible" src="https://img.shields.io/badge/Ansible-core-EE0000?style=flat-square&logo=ansible&logoColor=white">
+</p>
+
+<p>
+  <a href="#installation"><img alt="Get started" src="https://img.shields.io/badge/🚀_Get_started-2ea44f?style=for-the-badge"></a>
+  <a href="#users-and-access"><img alt="Users and access" src="https://img.shields.io/badge/🔐_Access-d6336c?style=for-the-badge"></a>
+  <a href="#troubleshooting"><img alt="Troubleshooting" src="https://img.shields.io/badge/🩺_Troubleshooting-6e7781?style=for-the-badge"></a>
+  <a href="#tests"><img alt="Tests" src="https://img.shields.io/badge/✅_Tests-0969da?style=for-the-badge"></a>
+</p>
+
+</div>
+
+---
+
+## ✨ What it does
+
+| | |
+|---|---|
+| <a href="#watching-gitlab"><img alt="GitLab" src="https://img.shields.io/badge/GitLab-e5484d?style=for-the-badge&logo=gitlab&logoColor=white"></a> | **Watch GitLab.** See projects, pipelines, merge requests, runners, and users, with a health page that flags what needs attention. |
+| <a href="#watching-servers"><img alt="Servers" src="https://img.shields.io/badge/Servers-f2b705?style=for-the-badge&logo=linux&logoColor=black"></a> | **Watch your servers.** The panel logs in to each server over SSH every minute, reads its disks, memory, load, logins, kernel errors, and connections, and raises alerts from rules you control. |
+| <a href="#ansible"><img alt="Ansible" src="https://img.shields.io/badge/Ansible-f05a28?style=for-the-badge&logo=ansible&logoColor=white"></a> | **Run Ansible playbooks** on those servers. Write them in the panel or upload a project, dry-run them, then apply them, with a full log of every run. |
+| <a href="#terraform"><img alt="Terraform" src="https://img.shields.io/badge/Terraform-7c5cff?style=for-the-badge&logo=opentofu&logoColor=white"></a> | **Run Terraform** with OpenTofu. Keep workspaces in the panel, plan, review, and apply exactly the plan you reviewed. The panel keeps the state, encrypted, and checks the code against a built-in standard. |
+| <a href="#installing-a-tool-on-a-server"><img alt="Deploy" src="https://img.shields.io/badge/Deploy-f59f00?style=for-the-badge&logo=docker&logoColor=white"></a> | **Install and manage tools on your servers.** Fill in a form and click Deploy to set up GitLab, Nexus3, a Prometheus and Grafana stack, Nginx, HAProxy, Envoy, SigNoz, or your own Compose project. You can also connect stacks you already run, then start, stop, check, reconfigure, or remove them from the same page. |
+| <a href="#users-and-access"><img alt="Admin" src="https://img.shields.io/badge/Admin-d6336c?style=for-the-badge&logo=keycdn&logoColor=white"></a> | **Control who sees what.** Users, groups, and per-page access, checked by the backend on every request. |
+
+Each badge matches the color of its section in the panel's sidebar. Click one to jump to that part of this guide.
 
 ---
 
@@ -61,6 +89,7 @@ Ansible and OpenTofu don't need to be installed anywhere. The panel's backend im
 
    Paste the output into `CREDENTIAL_ENCRYPTION_KEY`.
 
+   > [!CAUTION]
    > **Keep this key safe and never change it.** If it changes, every saved server password stops working and has to be entered again, and the panel can no longer read the Terraform state and variables it keeps.
 
 5. **Check the database connection.** See [The panel's database](#the-panels-database).
@@ -79,7 +108,8 @@ Ansible and OpenTofu don't need to be installed anywhere. The panel's backend im
 
 The panel keeps everything in Postgres: users and sessions, services, servers, alerts, playbooks, runs, and Terraform workspaces and state.
 
-`docker-compose.yml` defines a `postgres` service, but **the backend is not connected to it right now.** The backend's `DATABASE_URL` points at `host.docker.internal:5432`, which is a Postgres running on the host machine, outside this compose project. `host.docker.internal` only works out of the box on Docker Desktop.
+> [!IMPORTANT]
+> `docker-compose.yml` defines a `postgres` service, but **the backend is not connected to it right now.** The backend's `DATABASE_URL` points at `host.docker.internal:5432`, which is a Postgres running on the host machine, outside this compose project. `host.docker.internal` only works out of the box on Docker Desktop.
 
 Pick one:
 
@@ -129,7 +159,8 @@ After changing `.env`, apply it with `docker compose up -d`.
 | `3000` (`WEB_PORT`) | The panel. This is the address people open. |
 | `8080` | The backend API. It's published on the host so a frontend started with `npm run dev` can reach it. |
 
-Port `8080` is published on every network interface. If people other than you can reach this machine, change that line in `docker-compose.yml` to `"127.0.0.1:8080:8080"`, or remove it.
+> [!WARNING]
+> Port `8080` is published on every network interface. If people other than you can reach this machine, change that line in `docker-compose.yml` to `"127.0.0.1:8080:8080"`, or remove it.
 
 ### Running without Docker
 
@@ -179,6 +210,7 @@ The backend checks access on every request, so hiding a page is not the only pro
 
 Changes to a user's access apply on their next click. Disabling or deleting a user signs them out immediately. Changing a password signs out the user's other sessions.
 
+> [!WARNING]
 > **Write access to Ansible or Terraform is powerful.** A playbook can run commands on the panel's own backend as well as on your servers, and it receives the SSH passwords of the servers it runs on. Terraform code can run commands on the backend too. Give these tabs only to people you'd trust with your servers' passwords.
 
 ---
@@ -396,6 +428,7 @@ Open a service from its list in the **Deploy** section. The buttons at the top c
 | **Down** | Removes the running containers | Kept |
 | **Delete** | Removes the service and **all of its data** from the server, then removes it from the panel | **Deleted permanently** |
 
+> [!CAUTION]
 > **Delete cannot be undone.** The panel asks you to confirm first. If the service was never deployed, Delete only removes it from the panel.
 
 To change a service's settings, edit the fields or the configuration on its page, click **Save**, then click **Redeploy**.
@@ -591,6 +624,9 @@ The end-to-end tests run only when `TEST_DATABASE_URL` is set. Point it at a thr
 Everything the panel knows, including services, servers, logins, saved passwords, playbooks, and Terraform state, lives in its Postgres database. Back that database up together with `CREDENTIAL_ENCRYPTION_KEY`; one is no use without the other. Stopping or updating the panel never touches the servers you deployed to.
 
 ## Tips
+
+> [!TIP]
+> New to the panel? Start with **Try it: a no-account example** in **Terraform › Workspaces**, and a **Dry run** in **Ansible**. Neither changes anything you care about.
 
 - Serve the panel over HTTPS behind a reverse proxy, and then set `COOKIE_SECURE=true`. The panel doesn't limit repeated login attempts itself, so let the reverse proxy rate-limit `/api/auth/login`.
 - Don't leave the backend's port `8080` open to your network. See [Ports](#ports).
