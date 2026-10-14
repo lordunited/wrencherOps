@@ -10,13 +10,10 @@ import { Button } from "@/components/Button";
 import { ROLE_COLOR, StatusBadge } from "@/components/StatusBadge";
 import { Findings } from "@/components/TfStandards";
 import type { TfRun, TfSummary } from "@/lib/api";
-import { formatDuration, timeAgo } from "@/lib/format";
+import { formatDuration } from "@/lib/format";
 import type { StatusRole } from "@/lib/format";
-
-const STATUS_ROLE: Record<TfRun["status"], StatusRole> = { running: "warning", success: "good", failed: "critical", canceled: "muted" };
-export const tfStatusRole = (s: TfRun["status"]) => STATUS_ROLE[s] ?? "muted";
-
-export const TF_KIND: Record<TfRun["kind"], string> = { plan: "plan", "destroy-plan": "destroy plan", apply: "apply" };
+import { TF_KIND, tfStatusRole } from "@/lib/terraform";
+import { LocalTime } from "@/components/LocalTime";
 
 const ACTION: Record<string, { sign: string; role: StatusRole; label: string }> = {
   create: { sign: "+", role: "good", label: "create" },
@@ -128,7 +125,7 @@ export function TfRunView({
         <StatusBadge role={tfStatusRole(run.status)} label={run.status} />
         {run.status !== "running" && run.kind !== "apply" && <SummaryChips summary={run.summary} />}
         <span className="text-xs text-text-muted">
-          {run.startedBy ? `${run.startedBy} · ` : ""}started {timeAgo(run.startedAt)}
+          {run.startedBy ? `${run.startedBy} · ` : ""}started <LocalTime value={run.startedAt} style="ago" />
           {run.finishedAt ? ` · took ${formatDuration(run.startedAt, run.finishedAt)}` : ""}
         </span>
         {run.status === "running" && canWrite && (

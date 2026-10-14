@@ -7,8 +7,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // Rule is what one API route needs: a level in (any of) some tabs. Resolve,
@@ -37,24 +40,58 @@ var signedIn = Rule{}
 // maxPeek bounds how much of a body is read to find what it creates.
 const maxPeek = 16 << 20
 
+var (
+	// ErrBodyTooLarge is a body longer than maxPeek: what it creates can't
+	// be told without reading all of it.
+	ErrBodyTooLarge = errors.New("request body too large")
+	// ErrBadBody is a body whose field can't be read the way the handler
+	// will read it.
+	ErrBadBody = errors.New("invalid request body")
+)
+
 // peekField reads one string field of a JSON body, leaving the body for
-// the handler to read as if untouched.
-func peekField(r *http.Request, field string) string {
+// the handler to read as if untouched. It fails rather than guess: the
+// handler must decode the same value the access check was made for, so a
+// body cut short, a body that isn't one JSON object, or a field spelled
+// twice (encoding/json matches field names case-insensitively, the last
+// one winning) is refused.
+func peekField(r *http.Request, field string) (string, error) {
 	if r.Body == nil {
-		return ""
+		return "", nil
 	}
-	b, err := io.ReadAll(io.LimitReader(r.Body, maxPeek))
+	b, err := io.ReadAll(io.LimitReader(r.Body, maxPeek+1))
 	r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(b), r.Body))
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("%w: %v", ErrBadBody, err)
+	}
+	if len(b) > maxPeek {
+		return "", ErrBodyTooLarge
 	}
 	var m map[string]json.RawMessage
-	if json.Unmarshal(b, &m) != nil {
-		return ""
+	if err := json.Unmarshal(b, &m); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrBadBody, err)
 	}
-	var s string
-	json.Unmarshal(m[field], &s)
-	return s
+	var raw json.RawMessage
+	found := false
+	for k, v := range m {
+		if !strings.EqualFold(k, field) {
+			continue
+		}
+		if found {
+			return "", fmt.Errorf("%w: %q is given more than once", ErrBadBody, field)
+		}
+		raw, found = v, true
+	}
+	var s *string
+	if found {
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return "", fmt.Errorf("%w: %q must be a string", ErrBadBody, field)
+		}
+	}
+	if s == nil {
+		return "", nil
+	}
+	return *s, nil
 }
 
 // Policy is the rule for every API route, by its exact ServeMux pattern.
@@ -75,7 +112,10 @@ func Policy(l Lookups) map[string]Rule {
 	}
 	// Connecting an existing stack is in the tab of what it is.
 	byKind := Rule{Need: Write, Resolve: func(ctx context.Context, r *http.Request) ([]string, error) {
-		kind := peekField(r, "kind")
+		kind, err := peekField(r, "kind")
+		if err != nil {
+			return nil, err
+		}
 		if kind == "" {
 			kind = "prometheus"
 		}
@@ -83,7 +123,11 @@ func Policy(l Lookups) map[string]Rule {
 	}}
 	// A new app is SigNoz's, or a custom compose one.
 	byTemplate := Rule{Need: Write, Resolve: func(ctx context.Context, r *http.Request) ([]string, error) {
-		if peekField(r, "template") == "signoz" {
+		template, err := peekField(r, "template")
+		if err != nil {
+			return nil, err
+		}
+		if template == "signoz" {
 			return []string{"deploy.signoz"}, nil
 		}
 		return []string{"deploy.compose"}, nil
@@ -160,12 +204,16 @@ func Policy(l Lookups) map[string]Rule {
 		"GET /api/services/{id}/envoy/snapshot":           byService(View),
 
 		// Compose apps: the list is filtered like services'.
-		"GET /api/apps":                  signedIn,
-		"POST /api/apps":                 byTemplate,
-		"GET /api/apps/{id}":             byApp(View),
-		"PUT /api/apps/{id}":             byApp(Write),
-		"DELETE /api/apps/{id}":          byApp(Write),
-		"POST /api/apps/{id}/servers":    byApp(Write),
+		"GET /api/apps":               signedIn,
+		"POST /api/apps":              byTemplate,
+		"GET /api/apps/{id}":          byApp(View),
+		"PUT /api/apps/{id}":          byApp(Write),
+		"DELETE /api/apps/{id}":       byApp(Write),
+		"POST /api/apps/{id}/servers": byApp(Write),
+		// The servers' .env files hold secrets: comparing shows them.
+		"GET /api/apps/{id}/env/sync":    byApp(Write),
+		"POST /api/apps/{id}/env/pull":   byApp(Write),
+		"POST /api/apps/{id}/env/push":   byApp(Write),
 		"GET /api/apps/templates/signoz": view("deploy.signoz"),
 		"POST /api/apps/detect":          write("deploy.compose"),
 		"POST /api/apps/detect/add":      write("deploy.compose"),
@@ -209,6 +257,8 @@ func Policy(l Lookups) map[string]Rule {
 		"GET /api/terraform/templates": view("terraform.workspaces"),
 		"GET /api/terraform/standard":  view("terraform.workspaces"),
 		"POST /api/terraform/fmt":      write("terraform.workspaces"),
+		// Adds an example to the editor's files; saving is a separate write.
+		"POST /api/terraform/snippets": write("terraform.workspaces"),
 		// Checking code against the standard only reads.
 		"POST /api/terraform/workspaces/{id}/analyze":  view("terraform.workspaces"),
 		"GET /api/terraform/workspaces":                view("terraform.workspaces"),

@@ -75,9 +75,62 @@ func (h *Handler) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, v, 0)
 }
 
-// handleStandard is the standard itself: every rule and the 30 concepts.
+// handleStandard is the standard itself: every rule, the 30 concepts, the
+// examples that can be added for them, and the providers that can be.
 func (h *Handler) handleStandard(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{"rules": Rules, "concepts": ConceptNames()}, 0)
+	type snippet struct {
+		Concept string `json:"concept"`
+		Title   string `json:"title"`
+		File    string `json:"file"`
+		Code    string `json:"code"`
+	}
+	snippets := make([]snippet, 0, len(Snippets))
+	for _, s := range Snippets {
+		snippets = append(snippets, snippet{s.Concept, s.Title, s.File, strings.ReplaceAll(s.Code, "{n}", "")})
+	}
+	writeJSON(w, map[string]any{"rules": Rules, "concepts": ConceptNames(), "snippets": snippets, "providers": ProviderChoices}, 0)
+}
+
+// handleSnippet adds a concept's example, or a provider, to the files
+// given (what's in the editor) and returns them: like Format, nothing is
+// saved until the editor saves.
+func (h *Handler) handleSnippet(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Files    []File `json:"files"`
+		Concept  string `json:"concept"`
+		Provider string `json:"provider"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBytes*2)).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	type result struct {
+		Files []File `json:"files"`
+		File  string `json:"file"`
+		Line  int    `json:"line,omitempty"`
+	}
+	var res result
+	var err error
+	switch {
+	case req.Provider != "":
+		res.Files, res.File, err = AddProvider(req.Files, req.Provider)
+	default:
+		s, ok := SnippetFor(req.Concept)
+		if !ok {
+			http.Error(w, fmt.Sprintf("%s: %v", req.Concept, ErrNoSnippet), http.StatusBadRequest)
+			return
+		}
+		res.Files, res.File, res.Line, err = AddSnippet(req.Files, s)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	if err := ValidateFiles(res.Files); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, res, 0)
 }
 
 // fmtTimeout bounds formatting one request's files.

@@ -14,6 +14,8 @@ import { PortChips } from "@/components/ServicePorts";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ComposeVolumes } from "@/components/ComposeVolumes";
 import { ProjectFilesEditor, type ProjectState } from "@/components/ProjectFilesEditor";
+import { EnvSyncPanel } from "@/components/EnvSyncPanel";
+import { LocalTime } from "@/components/LocalTime";
 import type { ComposeApp, Service } from "@/lib/api";
 import { serverLabel, type KnownServer } from "@/lib/servers";
 import { serviceHealthRole, serviceStatusRole } from "@/lib/format";
@@ -193,7 +195,7 @@ export function ComposeAppDetail({ initial, known = [] }: { initial: ComposeApp;
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatTile hero label="Servers" value={String(app.servers.length)} hint={`${deployed} deployed`} />
         <StatTile label="Healthy" value={`${healthy}/${app.servers.length}`} hint="as of each server's last sync" />
-        <StatTile label="Updated" value={new Date(app.updatedAt).toLocaleDateString()} hint="compose last saved" />
+        <StatTile label="Updated" value={<LocalTime value={app.updatedAt} style="date" />} hint="compose last saved" />
       </div>
 
       <section className="card flex flex-col gap-4 p-4 sm:p-5">
@@ -272,7 +274,14 @@ export function ComposeAppDetail({ initial, known = [] }: { initial: ComposeApp;
                 {s.healthDetail && <p className="break-all text-xs text-text-secondary">{s.healthDetail}</p>}
                 <p className="text-[11px] text-text-muted">
                   {s.username}@{s.host}
-                  {s.lastSyncedAt ? ` · last checked ${new Date(s.lastSyncedAt).toLocaleString()}` : " · not checked yet"}
+                  {s.lastSyncedAt ? (
+                    <>
+                      {" · last checked "}
+                      <LocalTime value={s.lastSyncedAt} />
+                    </>
+                  ) : (
+                    " · not checked yet"
+                  )}
                   {!s.hasSavedPassword && " · no saved password"}
                 </p>
               </li>
@@ -347,9 +356,18 @@ export function ComposeAppDetail({ initial, known = [] }: { initial: ComposeApp;
         </div>
         <ProjectFilesEditor value={project} onChange={setProject} disabled={saving} composeFile={app.composeFile} />
         <p className="text-xs text-text-muted">
-          Saving updates every server&apos;s copy; nothing is redeployed until Deploy to all. Changing the folder only
-          affects the next deploy — a stack already running in the old folder stays there until you take it down.
+          Saving keeps the change in the panel; the servers get it on Deploy to all (or, for the .env, Write below).
+          Changing the folder only affects the next deploy — a stack already running in the old folder stays there until
+          you take it down.
         </p>
+        {canWrite && app.servers.length > 0 && (
+          <EnvSyncPanel
+            appId={app.id}
+            appEnv={app.env ?? ""}
+            pullBlocked={projectDirty ? "Save or discard your changes to the project first: taking a server's .env replaces the app's." : ""}
+            onPulled={() => router.refresh()}
+          />
+        )}
       </section>
 
       <ComposeVolumes analysis={app.analysis} stale={projectDirty || deployDir !== app.deployDir} />

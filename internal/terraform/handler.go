@@ -37,6 +37,7 @@ func (h *Handler) RegisterRoutes(mux interface {
 	mux.HandleFunc("GET /api/terraform/templates", h.handleTemplates)
 	mux.HandleFunc("GET /api/terraform/standard", h.handleStandard)
 	mux.HandleFunc("POST /api/terraform/fmt", h.handleFmt)
+	mux.HandleFunc("POST /api/terraform/snippets", h.handleSnippet)
 	mux.HandleFunc("POST /api/terraform/workspaces/{id}/analyze", h.handleAnalyze)
 	mux.HandleFunc("GET /api/terraform/workspaces", h.handleList)
 	mux.HandleFunc("POST /api/terraform/workspaces", h.handleCreate)

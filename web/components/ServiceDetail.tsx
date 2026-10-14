@@ -22,6 +22,8 @@ import { YamlEditor } from "@/components/YamlEditor";
 import type { DeployJob, Service, ServiceStatus } from "@/lib/api";
 import { ServiceContainers } from "@/components/ServiceContainers";
 import { ServicePorts } from "@/components/ServicePorts";
+import { ComposeEnvFiles } from "@/components/ComposeEnvFiles";
+import { LocalTime } from "@/components/LocalTime";
 import { serviceHealthRole, serviceStatusRole, type StatusRole } from "@/lib/format";
 
 const FIELD_CLASS =
@@ -725,22 +727,23 @@ export function ServiceDetail({
         </div>
         <StatTile
           label="Last sync"
-          value={
-            service.lastSyncedAt
-              ? new Date(service.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-              : "Never"
-          }
-          hint={service.lastSyncedAt ? new Date(service.lastSyncedAt).toLocaleDateString() : "Not checked yet"}
+          value={<LocalTime value={service.lastSyncedAt} style="time" empty="Never" />}
+          hint={<LocalTime value={service.lastSyncedAt} style="date" empty="Not checked yet" />}
         />
         <StatTile
           label="Status"
           value={service.status.charAt(0).toUpperCase() + service.status.slice(1)}
-          hint={`Updated ${new Date(service.updatedAt).toLocaleDateString()}`}
+          hint={
+            <>
+              Updated <LocalTime value={service.updatedAt} style="date" />
+            </>
+          }
         />
       </div>
 
       <ServicePorts ports={service.healthPorts} host={service.host} checkedAt={service.lastSyncedAt} />
       <ServiceContainers containers={service.healthContainers} stats={service.healthStats} />
+      <ComposeEnvFiles service={service} />
 
 
       {service.hasSavedPassword && !showSyncPassword && (

@@ -3,7 +3,7 @@
 
 import { WriteOnly } from "@/components/Access";
 import Link from "next/link";
-import { runStatusRole } from "@/components/AnsibleRunView";
+import { runStatusRole } from "@/lib/ansible";
 import { NewPlaybookForm } from "@/components/NewPlaybookForm";
 import { StatusBadge } from "@/components/StatusBadge";
 import { UploadPlaybook } from "@/components/UploadPlaybook";

@@ -2,7 +2,8 @@
 // Author: Mohammadreza Masoumi, DevOps Engineer
 
 import Link from "next/link";
-import { ChangePasswordForm, ROLE_INFO } from "@/components/AdminUsers";
+import { ChangePasswordForm } from "@/components/AdminUsers";
+import { ROLE_INFO } from "@/lib/roles";
 import { getMe } from "@/lib/api";
 import { NAV_CATEGORIES } from "@/lib/nav";
 

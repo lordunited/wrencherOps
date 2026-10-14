@@ -11,14 +11,9 @@ import { useMe } from "@/components/Access";
 import { Button } from "@/components/Button";
 import type { PanelGroup, PanelTab, PanelUserDetail, Role } from "@/lib/api";
 import type { TabAccess } from "@/lib/nav";
+import { ROLE_INFO } from "@/lib/roles";
 
 const LABEL = "flex flex-col gap-1 text-sm text-text-secondary";
-
-export const ROLE_INFO: Record<Role, string> = {
-  admin: "Everything, in every tab, and manages users and access.",
-  writer: "Exactly the access given below: view or write, per tab.",
-  viewer: "Can look, never change: at most view, whatever is given.",
-};
 
 async function send(method: string, path: string, body?: unknown): Promise<Response | null> {
   const res = await fetch(path, {

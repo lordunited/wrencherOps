@@ -2,7 +2,7 @@
 // Author: Mohammadreza Masoumi, DevOps Engineer
 
 import Link from "next/link";
-import { runStatusRole } from "@/components/AnsibleRunView";
+import { runStatusRole } from "@/lib/ansible";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getAnsibleRuns } from "@/lib/api";
 import { formatDuration, timeAgo } from "@/lib/format";

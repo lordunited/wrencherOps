@@ -10,14 +10,15 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AnsibleModulePicker } from "@/components/AnsibleModulePicker";
 import { AnsibleProjectTree, breadcrumb, roleSkeleton } from "@/components/AnsibleProjectTree";
-import { AnsibleRunView, runStatusRole } from "@/components/AnsibleRunView";
+import { AnsibleRunView } from "@/components/AnsibleRunView";
+import { runStatusRole } from "@/lib/ansible";
 import { Button } from "@/components/Button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { YamlEditor, languageFor } from "@/components/YamlEditor";
 import type { EditorView } from "@codemirror/view";
 import type { AnsibleFile, AnsiblePlaybook, AnsibleRun } from "@/lib/api";
 import { insertTask } from "@/lib/ansibleSnippet";
-import { timeAgo } from "@/lib/format";
+import { LocalTime } from "@/components/LocalTime";
 
 const ENTRY = "playbook.yml";
 const VALID_PATH = /^[A-Za-z0-9._@+-][A-Za-z0-9._@+/-]*$/;
@@ -282,7 +283,7 @@ export function PlaybookEditor({ initial, servers, initialRuns }: { initial: Ans
             </Button>
           )}
           {dirty && <span className="text-xs text-status-warning">Unsaved changes — runs use the saved version.</span>}
-          <span className="ml-auto text-xs text-text-muted">saved {timeAgo(saved.updatedAt)}</span>
+          <span className="ml-auto text-xs text-text-muted">saved <LocalTime value={saved.updatedAt} style="ago" /></span>
           {!canWrite ? null : confirmDelete ? (
             <span className="flex items-center gap-2 text-xs">
               Delete this playbook? Its runs stay in the history; nothing on any server changes.
@@ -480,7 +481,7 @@ export function PlaybookEditor({ initial, servers, initialRuns }: { initial: Ans
                 {starting === "apply" ? "Starting…" : `Apply to ${targets.length || "…"} server${targets.length === 1 ? "" : "s"}`}
               </Button>
               {passedDryRun ? (
-                <span className="text-xs text-status-good">✓ Dry run passed {timeAgo(passedDryRun.startedAt)}</span>
+                <span className="text-xs text-status-good">✓ Dry run passed <LocalTime value={passedDryRun.startedAt} style="ago" /></span>
               ) : (
                 targets.length > 0 &&
                 !dirty && (
@@ -538,7 +539,9 @@ export function PlaybookEditor({ initial, servers, initialRuns }: { initial: Ans
                   <StatusBadge role={runStatusRole(r.status)} label={r.status} />
                   <span className="text-text-primary">{r.targets.map((t) => t.name).join(", ")}</span>
                   {r.error && <span className="text-status-critical">{r.error}</span>}
-                  <span className="ml-auto text-text-muted">{timeAgo(r.startedAt)}</span>
+                  <span className="ml-auto text-text-muted">
+                    <LocalTime value={r.startedAt} style="ago" />
+                  </span>
                 </Link>
               </li>
             ))}

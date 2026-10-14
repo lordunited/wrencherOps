@@ -5,6 +5,7 @@ package ansible
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -52,16 +53,35 @@ ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o StrictHostKeyChecking=
 
 var hostNameRe = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
 
+// Ansible splits an inventory line like a shell does, so a host or user
+// with a space, quote, "=" or backslash would add variables of its own
+// (ansible_ssh_common_args runs commands on the panel). Only plain values
+// go in: hostnames, IPv4, IPv6 (with a zone), and the usual user names.
+var (
+	inventoryHostRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:%-]*$`)
+	inventoryUserRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._@$-]*$`)
+)
+
+// ErrBadTarget is a server whose address or user can't be put in an
+// inventory safely.
+var ErrBadTarget = errors.New("can't be used in an Ansible inventory")
+
 // inventory names each server for Ansible (from its name, made unique) and
 // points its password and become password at an environment variable, so
 // no password is ever written to disk.
-func inventory(logins []Login) (string, []Target, []string) {
+func inventory(logins []Login) (string, []Target, []string, error) {
 	var b strings.Builder
 	b.WriteString("[targets]\n")
 	used := map[string]bool{}
 	targets := make([]Target, len(logins))
 	env := make([]string, len(logins))
 	for i, l := range logins {
+		if !inventoryHostRe.MatchString(l.Host) {
+			return "", nil, nil, fmt.Errorf("server %s: address %q %w", l.Name, l.Host, ErrBadTarget)
+		}
+		if !inventoryUserRe.MatchString(l.User) {
+			return "", nil, nil, fmt.Errorf("server %s: SSH user %q %w", l.Name, l.User, ErrBadTarget)
+		}
 		name := strings.Trim(hostNameRe.ReplaceAllString(l.Name, "_"), "_.-")
 		if name == "" {
 			name = "server"
@@ -79,7 +99,7 @@ func inventory(logins []Login) (string, []Target, []string) {
 		targets[i] = t
 		env[i] = v + "=" + l.Password
 	}
-	return b.String(), targets, env
+	return b.String(), targets, env, nil
 }
 
 // ValidateExtraVars checks extra vars are a YAML (or JSON) mapping.
@@ -159,7 +179,10 @@ func NewRunner(store *Store) *Runner {
 // Start runs a playbook in the background and returns the run, already
 // saved as running. mode is "check" (--check --diff) or "apply" (--diff).
 func (r *Runner) Start(ctx context.Context, pb *Playbook, logins []Login, mode, extraVars string) (*Run, error) {
-	inv, targets, pwEnv := inventory(logins)
+	inv, targets, pwEnv, err := inventory(logins)
+	if err != nil {
+		return nil, err
+	}
 	run := &Run{PlaybookID: pb.ID, PlaybookName: pb.Name, Mode: mode, ContentSHA: ContentSHA(pb.Files, pb.Entry, extraVars), Targets: targets, ExtraVars: extraVars}
 	if err := r.store.CreateRun(ctx, run); err != nil {
 		return nil, err

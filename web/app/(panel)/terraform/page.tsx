@@ -5,7 +5,8 @@ import { WriteOnly } from "@/components/Access";
 import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TfNewWorkspace } from "@/components/TfNewWorkspace";
-import { SummaryChips, TF_KIND, tfStatusRole } from "@/components/TfRunView";
+import { SummaryChips } from "@/components/TfRunView";
+import { TF_KIND, tfStatusRole } from "@/lib/terraform";
 import { getTfTemplates, getTfWorkspaces } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
 

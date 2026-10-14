@@ -4,6 +4,7 @@
 import { ROLE_COLOR, StatusBadge } from "@/components/StatusBadge";
 import type { PortStatus } from "@/lib/api";
 import type { StatusRole } from "@/lib/format";
+import { LocalTime } from "@/components/LocalTime";
 
 const STATE: Record<PortStatus["state"], { role: StatusRole; label: string }> = {
   open: { role: "good", label: "open" },
@@ -31,7 +32,14 @@ export function ServicePorts({ ports, host, checkedAt }: { ports?: PortStatus[];
         <h2 className="section-title">Ports</h2>
         <span className="text-xs text-text-muted">
           {open} open{closed > 0 ? ` · ${closed} not reachable` : ""} · tried from the panel
-          {checkedAt ? ` at ${new Date(checkedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}
+          {checkedAt ? (
+            <>
+              {" at "}
+              <LocalTime value={checkedAt} style="time" />
+            </>
+          ) : (
+            ""
+          )}
         </span>
       </div>
       <ul className="flex flex-col gap-1.5">

@@ -82,6 +82,12 @@ func (g *Guard) Check(r *http.Request, a *Access) (*http.Request, int, string) {
 		if errors.Is(err, ErrNotFound) {
 			return r, http.StatusNotFound, "not found"
 		}
+		if errors.Is(err, ErrBodyTooLarge) {
+			return r, http.StatusRequestEntityTooLarge, err.Error()
+		}
+		if errors.Is(err, ErrBadBody) {
+			return r, http.StatusBadRequest, err.Error()
+		}
 		if err != nil {
 			return r, http.StatusInternalServerError, "checking access: " + err.Error()
 		}

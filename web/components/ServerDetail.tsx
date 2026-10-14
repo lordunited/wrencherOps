@@ -12,7 +12,8 @@ import { Button } from "@/components/Button";
 import { ServerMetrics } from "@/components/ServerMetrics";
 import { ROLE_COLOR, StatusBadge } from "@/components/StatusBadge";
 import type { ServerAuthEvent, ServerCount, WatchedServer } from "@/lib/api";
-import { bytesLabel, timeAgo, uptimeLabel, usageRole } from "@/lib/format";
+import { bytesLabel, uptimeLabel, usageRole } from "@/lib/format";
+import { LocalTime } from "@/components/LocalTime";
 
 const LABEL = "flex flex-col gap-1 text-sm text-text-secondary";
 
@@ -63,8 +64,8 @@ function AuthTable({ events, failed }: { events: ServerAuthEvent[]; failed?: boo
         <tbody className="font-mono text-text-primary">
           {events.map((e, i) => (
             <tr key={i} className="border-t border-border">
-              <td className="py-1 pr-3 text-text-secondary" title={new Date(e.time).toLocaleString()}>
-                {timeAgo(e.time)}
+              <td className="py-1 pr-3 text-text-secondary">
+                <LocalTime value={e.time} style="ago" />
               </td>
               <td className="py-1 pr-3">
                 {e.user || "(empty)"}
@@ -169,7 +170,7 @@ export function ServerDetail({ initial }: { initial: WatchedServer }) {
             {server.port !== 22 ? `:${server.port}` : ""}
             {snap ? ` · ${snap.hostname} · ${snap.os || "Linux"} · kernel ${snap.kernel} · ${snap.cpus} CPU${snap.cpus === 1 ? "" : "s"} · up ${uptimeLabel(snap.uptimeSeconds)}` : ""}
           </p>
-          <p className="mt-1 text-xs text-text-muted">Checked {timeAgo(server.checkedAt)} · every minute</p>
+          <p className="mt-1 text-xs text-text-muted">Checked <LocalTime value={server.checkedAt} style="ago" empty="never" /> · every minute</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button onClick={refresh} disabled={busy !== null}>
@@ -244,8 +245,8 @@ export function ServerDetail({ initial }: { initial: WatchedServer }) {
               <li key={a.id} className="flex flex-wrap items-center gap-2 rounded-2xl bg-surface-2 px-4 py-2.5">
                 <StatusBadge role={a.severity === "critical" ? "critical" : "warning"} label={a.severity} />
                 <span className="min-w-0 flex-1 text-sm text-text-primary">{a.message}</span>
-                <span className="text-xs text-text-muted" title={new Date(a.startedAt).toLocaleString()}>
-                  since {timeAgo(a.startedAt)}
+                <span className="text-xs text-text-muted">
+                  since <LocalTime value={a.startedAt} style="ago" />
                 </span>
                 {a.acknowledgedAt ? (
                   <span className="text-xs text-text-muted">acknowledged</span>
@@ -376,8 +377,8 @@ export function ServerDetail({ initial }: { initial: WatchedServer }) {
               <ul className="flex max-h-80 flex-col gap-1 overflow-auto font-mono text-xs">
                 {snap.kernelErrors.recent.map((k, i) => (
                   <li key={i} className="flex gap-3 rounded-lg bg-surface-2 px-3 py-1">
-                    <span className="shrink-0 text-text-muted" title={k.time ? new Date(k.time).toLocaleString() : undefined}>
-                      {k.time ? timeAgo(k.time) : ""}
+                    <span className="shrink-0 text-text-muted">
+                      <LocalTime value={k.time} style="ago" empty="" />
                     </span>
                     <span className="break-all text-text-primary">{k.message}</span>
                   </li>

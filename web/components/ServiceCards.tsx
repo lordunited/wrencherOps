@@ -12,6 +12,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import type { Service } from "@/lib/api";
 import { serviceHealthRole, serviceStatusRole } from "@/lib/format";
 import { filterItems, groupItems, healthCounts, sortItems, stackEdge, type GroupKey } from "@/lib/listing";
+import { LocalTime } from "@/components/LocalTime";
 
 const GROUPS: GroupKey[] = ["server", "health", "none"];
 
@@ -59,7 +60,9 @@ export function ServiceCards({ services, basePath }: { services: Service[]; base
                     <PortChips ports={svc.healthPorts} />
                     <div className="mt-auto flex items-center justify-between gap-2">
                       <StatusBadge role={serviceHealthRole(svc.health)} label={svc.health} />
-                      <span className="text-xs text-text-muted">Updated {new Date(svc.updatedAt).toLocaleDateString()}</span>
+                      <span className="text-xs text-text-muted">
+                        Updated <LocalTime value={svc.updatedAt} style="date" />
+                      </span>
                     </div>
                   </Link>
                 </div>

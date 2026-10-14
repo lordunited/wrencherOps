@@ -10,13 +10,14 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/Button";
 import { StatusBadge } from "@/components/StatusBadge";
-import { SummaryChips, TF_KIND, TfRunView, tfStatusRole } from "@/components/TfRunView";
+import { SummaryChips, TfRunView } from "@/components/TfRunView";
+import { TF_KIND, tfStatusRole, type TfConceptAction } from "@/lib/terraform";
 import { TfStandards } from "@/components/TfStandards";
 import { YamlEditor, languageFor } from "@/components/YamlEditor";
 import type { EditorView } from "@codemirror/view";
 import { importBlock, isImportAddress } from "@/lib/terraform";
-import type { TfFile, TfRule, TfRun, TfStandardView, TfState, TfVariable, TfWorkspace } from "@/lib/api";
-import { timeAgo } from "@/lib/format";
+import type { TfFile, TfProviderChoice, TfRule, TfRun, TfSnippet, TfStandardInfo, TfStandardView, TfState, TfVariable, TfWorkspace } from "@/lib/api";
+import { LocalTime } from "@/components/LocalTime";
 
 const LOCK = ".terraform.lock.hcl";
 const VALID_PATH = /^[A-Za-z0-9._@+-][A-Za-z0-9._@+/-]*$/;
@@ -122,6 +123,9 @@ export function TfWorkspaceEditor({ initial, initialRuns }: { initial: TfWorkspa
   const runRef = useRef<HTMLDivElement | null>(null);
   const [std, setStd] = useState<TfStandardView | null>(null);
   const [rules, setRules] = useState<TfRule[]>([]);
+  const [snippets, setSnippets] = useState<TfSnippet[]>([]);
+  const [providerChoices, setProviderChoices] = useState<TfProviderChoice[]>([]);
+  const [adding, setAdding] = useState<string | null>(null);
   const [replace, setReplace] = useState<string[]>([]);
   const [showReplace, setShowReplace] = useState(false);
   const [customReplace, setCustomReplace] = useState("");
@@ -160,7 +164,12 @@ export function TfWorkspaceEditor({ initial, initialRuns }: { initial: TfWorkspa
   useEffect(() => {
     fetch("/api/terraform/standard", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((s: { rules: TfRule[] } | null) => s && setRules(s.rules));
+      .then((s: TfStandardInfo | null) => {
+        if (!s) return;
+        setRules(s.rules);
+        setSnippets(s.snippets ?? []);
+        setProviderChoices(s.providers ?? []);
+      });
   }, []);
 
   // The code is checked against the standard as it's edited (the files in
@@ -309,6 +318,73 @@ export function TfWorkspaceEditor({ initial, initialRuns }: { initial: TfWorkspa
     }
   }
 
+  // addToCode adds a concept's example (or a pinned provider) to the files
+  // in the editor; like Format, nothing is saved until Save.
+  async function addToCode(req: { concept: string } | { provider: string }) {
+    setAdding("concept" in req ? req.concept : "provider");
+    try {
+      const res = await fetch("/api/terraform/snippets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...req, files }),
+      });
+      if (!res.ok) {
+        toast.error(await res.text(), { duration: 10000 });
+        return;
+      }
+      const out: { files: TfFile[]; file: string; line?: number } = await res.json();
+      setFiles(out.files);
+      openAt(out.file, out.line);
+      toast.success("concept" in req ? `Added to ${out.file}. Review it, Save, then Plan.` : `${req.provider} added to required_providers in ${out.file}. Save to keep it.`);
+    } finally {
+      setAdding(null);
+    }
+  }
+
+  // conceptAction runs what a run-side concept is, from its card.
+  function conceptAction(a: TfConceptAction) {
+    const toRun = () => setTimeout(() => runRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    switch (a) {
+      case "plan":
+      case "destroy-plan":
+        if (dirty) {
+          toast.error("Save first: plans use the saved code.");
+          return;
+        }
+        if (a === "plan" && std?.blocking) {
+          toast.error("The code breaks an enforced rule of the standard; fix the findings above, then plan.");
+          return;
+        }
+        if (running || starting) {
+          toast.error("A run is going already; wait for it, or cancel it.");
+          toRun();
+          return;
+        }
+        plan(a);
+        return;
+      case "apply": {
+        toRun();
+        const ready = active && active.kind !== "apply" && active.status === "success" && !active.appliedByRunId;
+        if (ready) toast.info("Review the plan below, then press Apply.");
+        else toast.info("Plan first: an apply takes exactly a reviewed plan.");
+        return;
+      }
+      case "replace":
+        setShowReplace(true);
+        toRun();
+        return;
+      case "import":
+        setTab("code");
+        setShowImport(true);
+        return;
+      case "state":
+      case "variables":
+      case "runs":
+        setTab(a);
+        return;
+    }
+  }
+
   const onFinished = useCallback(
     (run: TfRun) => {
       setRuns((rs) => rs.map((r) => (r.id === run.id ? run : r)));
@@ -400,7 +476,7 @@ export function TfWorkspaceEditor({ initial, initialRuns }: { initial: TfWorkspa
           )}
           {dirty && canWrite && <span className="text-xs text-status-warning">Unsaved changes — plans use the saved code.</span>}
           <span className="ml-auto text-xs text-text-muted">
-            {saved.ownBackend ? `state in its own ${saved.ownBackend} backend` : saved.stateSerial ? `state serial ${saved.stateSerial}, kept by the panel` : "no state yet"} · saved {timeAgo(saved.updatedAt)}
+            {saved.ownBackend ? `state in its own ${saved.ownBackend} backend` : saved.stateSerial ? `state serial ${saved.stateSerial}, kept by the panel` : "no state yet"} · saved <LocalTime value={saved.updatedAt} style="ago" />
           </span>
           {canWrite && (
             <Button variant="danger" className="px-3 py-1 text-xs" onClick={() => setConfirmDelete(!confirmDelete)}>
@@ -633,7 +709,22 @@ export function TfWorkspaceEditor({ initial, initialRuns }: { initial: TfWorkspa
         </section>
       )}
 
-      {tab === "standards" && <TfStandards std={std} rules={rules} onOpen={openAt} />}
+      {tab === "standards" && (
+        <TfStandards
+          std={std}
+          rules={rules}
+          onOpen={openAt}
+          use={{
+            snippets,
+            providers: providerChoices,
+            canWrite,
+            busy: adding,
+            onSnippet: (concept) => addToCode({ concept }),
+            onProvider: (provider) => addToCode({ provider }),
+            onAction: conceptAction,
+          }}
+        />
+      )}
 
       {tab === "variables" && (
         <section className="card flex flex-col gap-3 p-4 sm:p-5">
@@ -758,7 +849,7 @@ export function TfWorkspaceEditor({ initial, initialRuns }: { initial: TfWorkspa
                   <ul className="mt-1 flex flex-col gap-0.5 font-mono">
                     {state.versions.map((v) => (
                       <li key={v.serial}>
-                        serial {v.serial} · {new Date(v.createdAt).toLocaleString()}
+                        serial {v.serial} · <LocalTime value={v.createdAt} />
                         {v.runId && (
                           <Link href={`/terraform/runs/${v.runId}`} className="ml-2 text-accent hover:underline">
                             run
@@ -786,7 +877,9 @@ export function TfWorkspaceEditor({ initial, initialRuns }: { initial: TfWorkspa
                 <SummaryChips summary={r.summary} />
                 {r.appliedByRunId && <span className="text-status-good">applied</span>}
                 {r.error && <span className="text-status-critical">{r.error}</span>}
-                <span className="ml-auto text-text-muted">{timeAgo(r.startedAt)}</span>
+                <span className="ml-auto text-text-muted">
+                  <LocalTime value={r.startedAt} style="ago" />
+                </span>
               </Link>
             ))
           )}

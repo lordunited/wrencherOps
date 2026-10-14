@@ -11,9 +11,9 @@ export function StatTile({
   hero = false,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   href?: string;
-  hint?: string;
+  hint?: React.ReactNode;
   hero?: boolean;
 }) {
   const content = (

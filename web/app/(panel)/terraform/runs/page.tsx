@@ -3,7 +3,8 @@
 
 import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
-import { SummaryChips, TF_KIND, tfStatusRole } from "@/components/TfRunView";
+import { SummaryChips } from "@/components/TfRunView";
+import { TF_KIND, tfStatusRole } from "@/lib/terraform";
 import { getTfRuns } from "@/lib/api";
 import { formatDuration, timeAgo } from "@/lib/format";
 

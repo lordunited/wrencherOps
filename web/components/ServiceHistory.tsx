@@ -8,6 +8,7 @@ import { Button } from "@/components/Button";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { ServiceLogEntry } from "@/lib/api";
 import { formatDuration, logStatusRole } from "@/lib/format";
+import { LocalTime } from "@/components/LocalTime";
 
 const ACTION_LABEL: Record<ServiceLogEntry["action"], string> = {
   deploy: "Deploy",
@@ -140,7 +141,7 @@ export function ServiceHistory({
                   className="grid w-full grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 px-4 py-3 text-left text-sm transition-colors hover:bg-surface-hover sm:grid-cols-[11rem_6.5rem_1fr_auto]"
                 >
                   <span className="col-span-2 font-mono text-xs tabular-nums text-text-muted sm:col-span-1">
-                    {new Date(entry.startedAt).toLocaleString()}
+                    <LocalTime value={entry.startedAt} />
                   </span>
                   <span className="font-bold text-text-primary">
                     {ACTION_LABEL[entry.action] ?? entry.action}

@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/Button";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { ServerAlert, ServerAlertRule, ServerRuleKind } from "@/lib/api";
-import { timeAgo } from "@/lib/format";
+import { LocalTime } from "@/components/LocalTime";
 
 type Tab = "alerts" | "rules";
 
@@ -113,8 +113,16 @@ function AlertsList({ initial }: { initial: ServerAlert[] }) {
                 <li key={a.id} className={`flex flex-wrap items-center gap-2 rounded-2xl bg-surface-2 px-4 py-2.5 ${a.resolvedAt ? "opacity-60" : ""}`}>
                   <StatusBadge role={a.resolvedAt ? "muted" : a.severity === "critical" ? "critical" : "warning"} label={a.resolvedAt ? "resolved" : a.severity} />
                   <span className="min-w-0 flex-1 text-sm text-text-primary">{a.message}</span>
-                  <span className="text-xs text-text-muted" title={new Date(a.startedAt).toLocaleString()}>
-                    {a.resolvedAt ? `${timeAgo(a.startedAt)} → resolved ${timeAgo(a.resolvedAt)}` : `since ${timeAgo(a.startedAt)}`}
+                  <span className="text-xs text-text-muted">
+                    {a.resolvedAt ? (
+                      <>
+                        <LocalTime value={a.startedAt} style="ago" /> → resolved <LocalTime value={a.resolvedAt} style="ago" />
+                      </>
+                    ) : (
+                      <>
+                        since <LocalTime value={a.startedAt} style="ago" />
+                      </>
+                    )}
                   </span>
                   {a.ruleName && <span className="text-xs text-text-muted">· {a.ruleName}</span>}
                   {!a.resolvedAt &&

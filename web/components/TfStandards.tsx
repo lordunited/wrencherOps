@@ -3,9 +3,86 @@
 
 "use client";
 
+import { useRef, useState } from "react";
+import { Button } from "@/components/Button";
 import { ROLE_COLOR, StatusBadge } from "@/components/StatusBadge";
-import type { TfBlock, TfConcept, TfFinding, TfRule, TfStandardView } from "@/lib/api";
+import type { TfBlock, TfConcept, TfFinding, TfProviderChoice, TfRule, TfSnippet, TfStandardView } from "@/lib/api";
 import type { StatusRole } from "@/lib/format";
+import { CONCEPT_ACTIONS, type TfConceptAction } from "@/lib/terraform";
+
+// ConceptUse is what a concept card offers: its example to add to the code,
+// a provider to add, or the panel action it is.
+export interface ConceptUse {
+  snippets: TfSnippet[];
+  providers: TfProviderChoice[];
+  canWrite: boolean;
+  // busy is the concept (or "provider") being added, or null.
+  busy: string | null;
+  onSnippet: (concept: string) => void;
+  onProvider: (name: string) => void;
+  onAction: (action: TfConceptAction) => void;
+}
+
+const SMALL = "px-3 py-1 text-xs";
+
+function ConceptButtons({ concept, use, onRules }: { concept: string; use: ConceptUse; onRules: () => void }) {
+  const [showCode, setShowCode] = useState(false);
+  const [provider, setProvider] = useState("");
+  const snippet = use.snippets.find((s) => s.concept === concept);
+  const action = CONCEPT_ACTIONS[concept];
+
+  if (concept === "Providers") {
+    if (!use.canWrite || use.providers.length === 0) return null;
+    return (
+      <div className="flex flex-wrap items-center gap-2 pl-7 pt-1">
+        <select className="field max-w-full py-1 text-xs" value={provider} onChange={(e) => setProvider(e.target.value)} aria-label="Provider to add">
+          <option value="">Pick a provider…</option>
+          {use.providers.map((p) => (
+            <option key={p.name} value={p.name}>
+              {p.label} — {p.source} {p.version}
+            </option>
+          ))}
+        </select>
+        <Button className={SMALL} disabled={!provider || use.busy !== null} onClick={() => use.onProvider(provider)}>
+          {use.busy === "provider" ? "Adding…" : "Add pinned"}
+        </Button>
+      </div>
+    );
+  }
+  if (snippet) {
+    return (
+      <div className="flex flex-col gap-2 pl-7 pt-1">
+        <div className="flex flex-wrap gap-2">
+          {use.canWrite && (
+            <Button className={SMALL} disabled={use.busy !== null} onClick={() => use.onSnippet(concept)} title={`Adds it to ${snippet.file}; save to keep it`}>
+              {use.busy === concept ? "Adding…" : `+ ${snippet.title}`}
+            </Button>
+          )}
+          <Button variant="secondary" className={SMALL} onClick={() => setShowCode(!showCode)} aria-expanded={showCode}>
+            {showCode ? "Hide example" : "Show example"}
+          </Button>
+        </div>
+        {showCode && (
+          <pre className="max-h-72 overflow-auto rounded-xl bg-surface-1 p-3 font-mono text-[11px] leading-relaxed text-text-primary">
+            <span className="text-text-muted"># {snippet.file}</span>
+            {"\n"}
+            {snippet.code}
+          </pre>
+        )}
+      </div>
+    );
+  }
+  if (action && (use.canWrite || !action.write)) {
+    return (
+      <div className="pl-7 pt-1">
+        <Button variant={action.action === "destroy-plan" ? "danger" : "secondary"} className={SMALL} onClick={() => (action.action === "rules" ? onRules() : use.onAction(action.action))}>
+          {action.label}
+        </Button>
+      </div>
+    );
+  }
+  return null;
+}
 
 const SEVERITY: Record<TfFinding["severity"], { role: StatusRole; label: string }> = {
   error: { role: "critical", label: "enforced" },
@@ -91,8 +168,14 @@ const ROW = "flex flex-wrap items-center gap-1.5 rounded-xl bg-surface-2 px-3 py
 
 // TfStandards is a workspace's code against the panel's Terraform
 // standard: what breaks it, the code's structure, and the 30 concepts.
-export function TfStandards({ std, rules, onOpen }: { std: TfStandardView | null; rules: TfRule[]; onOpen: (file: string, line?: number) => void }) {
+export function TfStandards({ std, rules, onOpen, use }: { std: TfStandardView | null; rules: TfRule[]; onOpen: (file: string, line?: number) => void; use: ConceptUse }) {
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const rulesRef = useRef<HTMLDetailsElement>(null);
   if (!std) return <p className="card p-5 text-sm text-text-muted">Checking the code…</p>;
+  const showRules = () => {
+    setRulesOpen(true);
+    setTimeout(() => rulesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
   const errors = std.findings.filter((f) => f.severity === "error");
   const advice = std.findings.filter((f) => f.severity !== "error");
   const fnCalls = Object.entries(std.functions).sort((a, b) => b[1] - a[1]);
@@ -253,7 +336,10 @@ export function TfStandards({ std, rules, onOpen }: { std: TfStandardView | null
       <section className="card flex flex-col gap-3 p-4 sm:p-5">
         <div>
           <h2 className="section-title">The 30 concepts</h2>
-          <p className="mt-1 text-xs text-text-muted">How the panel handles each, and what this workspace&apos;s code does with it.</p>
+          <p className="mt-1 text-xs text-text-muted">
+            How the panel handles each, and what this workspace&apos;s code does with it. Each one is usable from here: add a working
+            example to the code (no cloud account needed; review it, Save, then Plan), or run what it is.
+          </p>
         </div>
         <ol className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {std.concepts.map((c, i) => (
@@ -270,13 +356,14 @@ export function TfStandards({ std, rules, onOpen }: { std: TfStandardView | null
               </p>
               <p className="pl-7 text-[11px] text-text-muted">{c.panel}</p>
               {c.rules && c.rules.length > 0 && <p className="pl-7 font-mono text-[10px] text-text-muted">{c.rules.join(" · ")}</p>}
+              <ConceptButtons concept={c.name} use={use} onRules={showRules} />
             </li>
           ))}
         </ol>
       </section>
 
       {rules.length > 0 && (
-        <details className="card p-4 sm:p-5">
+        <details ref={rulesRef} className="card p-4 sm:p-5" open={rulesOpen} onToggle={(e) => setRulesOpen(e.currentTarget.open)}>
           <summary className="cursor-pointer text-sm font-bold text-text-primary">The rules ({rules.length})</summary>
           <ul className="mt-3 flex flex-col gap-1.5">
             {rules.map((r) => (

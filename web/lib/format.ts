@@ -132,6 +132,30 @@ export function bytesLabel(b: number): string {
   return `${v >= 100 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, "")} ${units[i]}`;
 }
 
+// TimeStyle is how LocalTime shows a moment.
+export type TimeStyle = "datetime" | "date" | "time" | "ago";
+
+const pad = (n: number) => String(n).padStart(2, "0");
+
+// formatUTC is a moment as the same text everywhere — server, browser, any
+// locale or time zone — for HTML that must hydrate unchanged.
+export function formatUTC(d: Date, style: TimeStyle): string {
+  const date = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  const time = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  if (style === "date") return date;
+  if (style === "time") return `${time} UTC`;
+  return `${date} ${time} UTC`;
+}
+
+// localTime is a moment in the viewer's locale and time zone, or relative
+// to now; only for the browser, after hydration (LocalTime).
+export function localTime(d: Date, style: TimeStyle): string {
+  if (style === "ago") return timeAgo(d.toISOString());
+  if (style === "date") return d.toLocaleDateString();
+  if (style === "time") return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleString();
+}
+
 export function timeAgo(iso?: string): string {
   if (!iso) return "never";
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));

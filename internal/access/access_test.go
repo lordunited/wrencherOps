@@ -5,6 +5,7 @@ package access
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -225,16 +226,45 @@ func TestParseGrants(t *testing.T) {
 func TestPeekFieldKeepsTheBody(t *testing.T) {
 	body := `{"kind":"nginx","host":"h","password":"pw"}`
 	r := httptest.NewRequest("POST", "/x", strings.NewReader(body))
-	if got := peekField(r, "kind"); got != "nginx" {
-		t.Errorf("peekField = %q", got)
+	if got, err := peekField(r, "kind"); got != "nginx" || err != nil {
+		t.Errorf("peekField = %q, %v", got, err)
 	}
 	rest, _ := io.ReadAll(r.Body)
 	if string(rest) != body {
 		t.Errorf("the body after a peek = %q", rest)
 	}
-	r = httptest.NewRequest("POST", "/x", strings.NewReader("not json"))
-	if got := peekField(r, "kind"); got != "" {
-		t.Errorf("peekField of junk = %q", got)
+}
+
+// The peek must see what the handler's json decoding will: whatever it
+// can't be sure of is refused, never guessed.
+func TestPeekFieldReadsLikeTheHandler(t *testing.T) {
+	cases := []struct {
+		name, body string
+		want       string
+		err        error
+	}{
+		{"missing field", `{"host":"h"}`, "", nil},
+		{"null field", `{"kind":null}`, "", nil},
+		{"other case", `{"KIND":"gitlab"}`, "gitlab", nil},
+		{"spelled twice", `{"kind":"prometheus","KIND":"gitlab"}`, "", ErrBadBody},
+		{"spelled twice, Kelvin sign", `{"kind":"prometheus","Kind":"gitlab"}`, "", ErrBadBody},
+		{"not a string", `{"kind":7}`, "", ErrBadBody},
+		{"not json", `not json`, "", ErrBadBody},
+		{"empty", ``, "", ErrBadBody},
+		{"trailing value", `{"kind":"prometheus"} {"kind":"gitlab"}`, "", ErrBadBody},
+		{"too large", `{"pad":"` + strings.Repeat("x", maxPeek) + `","kind":"gitlab"}`, "", ErrBodyTooLarge},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := httptest.NewRequest("POST", "/x", strings.NewReader(c.body))
+			got, err := peekField(r, "kind")
+			if got != c.want || !errors.Is(err, c.err) {
+				t.Errorf("peekField = %q, %v; want %q, %v", got, err, c.want, c.err)
+			}
+			if rest, _ := io.ReadAll(r.Body); string(rest) != c.body {
+				t.Errorf("the body after a peek is %d bytes, want %d", len(rest), len(c.body))
+			}
+		})
 	}
 }
 
@@ -328,7 +358,11 @@ func TestGuard(t *testing.T) {
 		{"t-wendy", "GET", "/api/services/s-missing", "", 404},
 		{"t-wendy", "POST", "/api/services/connect", `{"kind":"nginx","container":"c"}`, 200},
 		{"t-wendy", "POST", "/api/services/connect", `{"kind":"envoy"}`, 403},
-		{"t-wendy", "POST", "/api/services/connect", `{}`, 403},           // prometheus by default
+		{"t-wendy", "POST", "/api/services/connect", `{}`, 403},               // prometheus by default
+		{"t-wendy", "POST", "/api/services/connect", `{"KIND":"nginx"}`, 200}, // the handler matches any case
+		{"t-wendy", "POST", "/api/services/connect", `{"kind":"nginx","KIND":"envoy"}`, 400},
+		{"t-wendy", "POST", "/api/services/connect", `{"pad":"` + strings.Repeat("x", maxPeek) + `","kind":"nginx"}`, 413},
+		{"t-victor", "POST", "/api/apps", `{"template":"x","TEMPLATE":"signoz"}`, 400},
 		{"t-wendy", "POST", "/api/terraform/workspaces/w1/runs", "", 200}, // through the group
 		{"t-wendy", "GET", "/api/terraform/runs", "", 200},
 		{"t-wendy", "GET", "/api/admin/users", "", 403},

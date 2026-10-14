@@ -4,6 +4,7 @@
 package ansible
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -40,10 +41,13 @@ func TestContentSHA(t *testing.T) {
 }
 
 func TestInventory(t *testing.T) {
-	inv, targets, env := inventory([]Login{
+	inv, targets, env, err := inventory([]Login{
 		{Target: Target{ServerID: "a", Name: "web 1", Host: "10.0.0.1", User: "root"}, Port: 22, Password: "s3cret 'x'"},
 		{Target: Target{ServerID: "b", Name: "web 1", Host: "10.0.0.2", User: "deploy"}, Port: 2222, Password: "p2"},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(inv, "s3cret") || strings.Contains(inv, "p2") {
 		t.Errorf("a password is in the inventory file:\n%s", inv)
 	}
@@ -53,6 +57,36 @@ func TestInventory(t *testing.T) {
 	}
 	if targets[0].Name != "web_1" || targets[1].Name != "web_1_2" || env[0] != "PANEL_PW_0=s3cret 'x'" || env[1] != "PANEL_PW_1=p2" {
 		t.Errorf("targets %+v env %v", targets, env)
+	}
+}
+
+// A host or user that would add inventory variables of its own is refused;
+// ordinary ones are kept.
+func TestInventoryRefusesInjection(t *testing.T) {
+	cases := []struct {
+		host, user string
+		ok         bool
+	}{
+		{"10.0.0.1", "root", true},
+		{"web-1.example.com", "deploy", true},
+		{"fe80::1%eth0", "svc.user@corp", true},
+		{"2001:db8::7", "machine$", true},
+		{"10.0.0.1 ansible_ssh_common_args='-o ProxyCommand=id'", "root", false},
+		{"10.0.0.1", "root ansible_become_exe=sh", false},
+		{"10.0.0.1", `CORP\alice`, false},
+		{"10.0.0.1", `root"`, false},
+		{"-oProxyCommand=id", "root", false},
+		{"", "root", false},
+		{"10.0.0.1", "", false},
+	}
+	for _, c := range cases {
+		_, _, _, err := inventory([]Login{{Target: Target{Name: "s", Host: c.host, User: c.user}, Port: 22}})
+		if c.ok && err != nil {
+			t.Errorf("host %q user %q refused: %v", c.host, c.user, err)
+		}
+		if !c.ok && !errors.Is(err, ErrBadTarget) {
+			t.Errorf("host %q user %q accepted (err %v)", c.host, c.user, err)
+		}
 	}
 }
 

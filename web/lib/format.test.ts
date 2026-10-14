@@ -83,3 +83,20 @@ describe("timeAgo", () => {
     expect(timeAgo("2026-06-01T12:05:00Z")).toBe("0s ago"); // a clock ahead isn't negative
   });
 });
+
+describe("hydration-safe times", () => {
+  // The server and the browser must render the same text before hydration,
+  // whatever the viewer's locale or time zone: formatUTC uses neither.
+  it("format the same moment the same way everywhere", async () => {
+    const { formatUTC } = await import("@/lib/format");
+    const d = new Date("2026-10-14T09:56:40Z");
+    expect(formatUTC(d, "datetime")).toBe("2026-10-14 09:56 UTC");
+    expect(formatUTC(d, "date")).toBe("2026-10-14");
+    expect(formatUTC(d, "time")).toBe("09:56 UTC");
+    expect(formatUTC(d, "ago")).toBe("2026-10-14 09:56 UTC");
+  });
+  it("pad months, days, hours and minutes", async () => {
+    const { formatUTC } = await import("@/lib/format");
+    expect(formatUTC(new Date("2026-01-02T03:04:00Z"), "datetime")).toBe("2026-01-02 03:04 UTC");
+  });
+});

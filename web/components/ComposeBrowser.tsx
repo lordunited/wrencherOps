@@ -12,6 +12,7 @@ import { ContainerSummary } from "@/components/ServiceContainers";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { Service } from "@/lib/api";
 import { serviceHealthRole, serviceStatusRole } from "@/lib/format";
+import { LocalTime } from "@/components/LocalTime";
 import { filterItems, groupItems, healthCounts, sortItems, stackEdge, type GroupKey } from "@/lib/listing";
 
 // StackProject is one compose project on one server: a server of an app,
@@ -148,7 +149,9 @@ export function ComposeBrowser({ projects, unplaced, initialGroup }: { projects:
                   <StackChip />
                 </span>
                 <span className="truncate font-mono text-xs text-text-secondary">{app.deployDir}</span>
-                <span className="text-xs text-text-muted">Updated {new Date(app.updatedAt).toLocaleDateString()}</span>
+                <span className="text-xs text-text-muted">
+                  Updated <LocalTime value={app.updatedAt} style="date" />
+                </span>
               </Link>
             ))}
           </div>

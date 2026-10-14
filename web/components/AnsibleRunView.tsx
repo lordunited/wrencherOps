@@ -9,14 +9,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/Button";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { AnsibleRun } from "@/lib/api";
-import { formatDuration, timeAgo } from "@/lib/format";
-import type { StatusRole } from "@/lib/format";
-
-const STATUS_ROLE: Record<AnsibleRun["status"], StatusRole> = { running: "warning", success: "good", failed: "critical", canceled: "muted" };
-
-export function runStatusRole(s: AnsibleRun["status"]): StatusRole {
-  return STATUS_ROLE[s] ?? "muted";
-}
+import { runStatusRole } from "@/lib/ansible";
+import { formatDuration } from "@/lib/format";
+import { LocalTime } from "@/components/LocalTime";
 
 // AnsibleRunView shows one run — its result per server and its log — and
 // follows it live while it runs.
@@ -60,7 +55,7 @@ export function AnsibleRunView({ initial, onFinished }: { initial: AnsibleRun; o
         <StatusBadge role={runStatusRole(run.status)} label={run.status} />
         <span className="text-sm font-semibold text-text-primary">{run.playbookName}</span>
         <span className="text-xs text-text-muted">
-          on {run.targets.map((t) => t.name).join(", ")} · started {timeAgo(run.startedAt)}
+          on {run.targets.map((t) => t.name).join(", ")} · started <LocalTime value={run.startedAt} style="ago" />
           {run.finishedAt ? ` · took ${formatDuration(run.startedAt, run.finishedAt)}` : ""}
         </span>
         {run.status === "running" && canWrite && (

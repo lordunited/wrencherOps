@@ -403,12 +403,64 @@ func TestConcepts(t *testing.T) {
 	}
 }
 
-// Every template the panel offers meets the standard.
+// Every template the panel offers meets the standard. The one rule a
+// template may break is TF012, and only for its root variables: a login
+// (an address, a region) has no sensible default, so the workspace asks
+// for it on the Variables tab before its first plan.
 func TestTemplatesMeetTheStandard(t *testing.T) {
 	for _, tp := range Templates {
+		if err := ValidateFiles(tp.Files); err != nil {
+			t.Errorf("template %s: %v", tp.Key, err)
+		}
 		a := Analyze(tp.Files, AnalyzeOptions{})
-		if errs := append(a.Errors(), a.ParseErrors...); len(errs) > 0 {
-			t.Errorf("template %s: %+v", tp.Key, errs)
+		if len(a.ParseErrors) > 0 {
+			t.Errorf("template %s: %+v", tp.Key, a.ParseErrors)
+		}
+		for _, f := range a.Errors() {
+			if f.Rule == "TF012" && f.File == "variables.tf" {
+				continue
+			}
+			t.Errorf("template %s: %+v", tp.Key, f)
+		}
+	}
+}
+
+// Every module template folder is listed, and every listed one has a
+// root module that calls its own module.
+func TestModuleTemplatesAreComplete(t *testing.T) {
+	entries, err := moduleTemplateFS.ReadDir("moduletemplates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]bool{}
+	for _, m := range moduleTemplates {
+		listed[m.Key] = true
+	}
+	for _, e := range entries {
+		if !listed[e.Name()] {
+			t.Errorf("moduletemplates/%s isn't listed in moduleTemplates", e.Name())
+		}
+	}
+	keys := map[string]bool{}
+	for _, tp := range Templates {
+		if keys[tp.Key] {
+			t.Errorf("template key %s is used twice", tp.Key)
+		}
+		keys[tp.Key] = true
+		if !listed[tp.Key] {
+			continue
+		}
+		have := map[string]string{}
+		for _, f := range tp.Files {
+			have[f.Path] = f.Content
+		}
+		for _, p := range []string{"versions.tf", "providers.tf", "variables.tf", "main.tf", "outputs.tf"} {
+			if _, ok := have[p]; !ok {
+				t.Errorf("template %s has no %s", tp.Key, p)
+			}
+		}
+		if !strings.Contains(have["main.tf"], `source   = "./modules/`) {
+			t.Errorf("template %s: main.tf doesn't call a module under modules/", tp.Key)
 		}
 	}
 }

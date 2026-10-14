@@ -2,7 +2,30 @@
 // Author: Mohammadreza Masoumi, DevOps Engineer
 
 import { describe, expect, it } from "vitest";
-import { importBlock, isImportAddress } from "@/lib/terraform";
+import { CONCEPT_ACTIONS, importBlock, isImportAddress, tfStatusRole, TF_KIND } from "@/lib/terraform";
+
+describe("concept actions", () => {
+  // The backend's TestEveryConceptCanBeUsed lists the same 11 plus
+  // Providers, which has its own picker.
+  it("cover the run-side concepts", () => {
+    expect(Object.keys(CONCEPT_ACTIONS).sort()).toEqual(
+      ["Apply", "Destroy", "Import", "Init", "Plan", "Sentinel", "State File", "TFC/TFE", "Taint", "Workflows", "Workspace Variables"].sort(),
+    );
+  });
+  it("let only writers run or change things", () => {
+    for (const [name, a] of Object.entries(CONCEPT_ACTIONS)) {
+      expect(a.write, name).toBe(["plan", "destroy-plan", "apply", "replace", "import"].includes(a.action));
+    }
+  });
+});
+
+describe("run labels", () => {
+  it("name each kind and status", () => {
+    expect(TF_KIND["destroy-plan"]).toBe("destroy plan");
+    expect(tfStatusRole("failed")).toBe("critical");
+    expect(tfStatusRole("running")).toBe("warning");
+  });
+});
 
 describe("import blocks", () => {
   it("accept only a root resource address", () => {

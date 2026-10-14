@@ -388,6 +388,20 @@ export interface DetectedProject {
   envFiles?: EnvFile[];
 }
 
+// EnvSync is how one server's .env compares with its app's (GET
+// /api/apps/{id}/env/sync).
+export interface EnvSync {
+  serviceId: string;
+  host: string;
+  path: string;
+  status: "in-sync" | "differs" | "not-on-server" | "only-on-server" | "unreachable";
+  serverExists: boolean;
+  serverEnv?: string;
+  serverSha?: string;
+  error?: string;
+  checkedAt: string;
+}
+
 export interface EnvFile {
   path: string; // absolute, on the server
   label: string; // as the compose writes it, or ".env"
@@ -1104,6 +1118,30 @@ export interface TfRule {
   severity: TfSeverity;
   title: string;
   why: string;
+}
+
+// TfSnippet is a concept's working example, added to the code from the
+// Standards tab (GET /api/terraform/standard).
+export interface TfSnippet {
+  concept: string;
+  title: string;
+  file: string;
+  code: string;
+}
+
+// TfProviderChoice is a pinned provider the Providers concept can add.
+export interface TfProviderChoice {
+  name: string;
+  source: string;
+  version: string;
+  label: string;
+}
+
+export interface TfStandardInfo {
+  rules: TfRule[];
+  concepts: string[];
+  snippets: TfSnippet[];
+  providers: TfProviderChoice[];
 }
 
 export interface TfBlock {

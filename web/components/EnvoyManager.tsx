@@ -10,8 +10,8 @@ import { LineDiff } from "@/components/LineDiff";
 import { ROLE_COLOR, StatusBadge } from "@/components/StatusBadge";
 import { YamlEditor } from "@/components/YamlEditor";
 import type { EnvoyReport } from "@/lib/api";
-import { timeAgo } from "@/lib/format";
 import { loadSnapshot } from "@/lib/snapshots";
+import { LocalTime } from "@/components/LocalTime";
 
 const LABEL = "flex flex-col gap-1 text-xs text-text-secondary";
 
@@ -246,7 +246,7 @@ export function EnvoyManager({ serviceId, hasSavedPassword, sshLabel }: { servic
     <div className="flex flex-col gap-4">
       {savedAt && (
         <p className="text-xs text-text-muted">
-          Showing the reading from {timeAgo(savedAt)}
+          Showing the reading from <LocalTime value={savedAt} style="ago" />
           {loading ? " — reading Envoy now…" : ""}
         </p>
       )}

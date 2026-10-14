@@ -289,6 +289,10 @@ func (h *Handler) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	run, err := h.runner.Start(r.Context(), pb, logins, req.Mode, req.ExtraVars)
+	if errors.Is(err, ErrBadTarget) {
+		http.Error(w, err.Error()+"; fix it on the server's page", http.StatusBadRequest)
+		return
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -106,8 +106,11 @@ func (r *Runner) Start(job Job, saveLog func(string), done func(status, errMsg, 
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
 	r.cancels.Store(job.Run.ID, cancel)
+	// Only this run's hold on the workspace is released: once release has
+	// run, the next run may already hold it.
+	release := func() { r.busy.CompareAndDelete(job.Run.WorkspaceID, job.Run.ID) }
 	go func() {
-		defer r.busy.Delete(job.Run.WorkspaceID)
+		defer release()
 		defer r.cancels.Delete(job.Run.ID)
 		defer cancel()
 		out := &logBuffer{}
@@ -131,7 +134,7 @@ func (r *Runner) Start(job Job, saveLog func(string), done func(status, errMsg, 
 		}()
 		status, errMsg, res := execute(ctx, job, out)
 		close(stop)
-		done(status, errMsg, out.String(), res, func() { r.busy.Delete(job.Run.WorkspaceID) })
+		done(status, errMsg, out.String(), res, release)
 	}()
 	return nil
 }
